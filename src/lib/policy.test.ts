@@ -5,7 +5,9 @@ import {
   finishStatus,
   normalizePhone,
   parseCredentials,
+  parseSchedule,
   planBatch,
+  readablePost,
   runDeliveries,
   type RawChat,
 } from "./policy";
@@ -149,6 +151,59 @@ test("caps targets per account and per run", () => {
     catalogs: catalog(chats),
   });
   assert.equal(tooMany.ok, false);
+});
+
+test("alternates one message per account before the next round", async () => {
+  const deliveries = [
+    delivery("a", "a1"),
+    delivery("a", "a2"),
+    delivery("b", "b1"),
+    delivery("b", "b2"),
+    delivery("c", "c1"),
+  ];
+  const seen: string[] = [];
+  let active = 0;
+  let maxActive = 0;
+  await runDeliveries({
+    deliveries,
+    intervalMs: 20,
+    signal: new AbortController().signal,
+    send: async (item) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      seen.push(item.chatId);
+      await Promise.resolve();
+      active -= 1;
+    },
+    sleep: async () => undefined,
+  });
+  assert.deepEqual(seen, ["a1", "b1", "c1", "a2", "b2"]);
+  assert.equal(maxActive, 1);
+});
+
+test("rejects a schedule outside the next week", () => {
+  const now = Date.parse("2026-10-08T12:00:00.000Z");
+  assert.equal(parseSchedule("", now).ok, true);
+  assert.equal(parseSchedule("2026-10-08T12:30:00.000Z", now).ok, true);
+  assert.equal(parseSchedule("2026-10-08T11:00:00.000Z", now).ok, false);
+  assert.equal(parseSchedule("2026-10-20T12:00:00.000Z", now).ok, false);
+});
+
+test("reads history text and ignores non-messages", () => {
+  const post = readablePost({
+    className: "Message",
+    id: 7,
+    message: "今晚例会改到九点",
+    date: 1_760_000_000,
+    views: 12,
+  });
+  assert.equal(post?.text, "今晚例会改到九点");
+  assert.equal(post?.views, 12);
+  assert.equal(readablePost({ className: "MessageService", id: 8, message: "加入了群" }), null);
+  assert.equal(
+    readablePost({ className: "Message", id: 9, mediaClass: "MessageMediaPhoto" })?.text,
+    "〔图片〕",
+  );
 });
 
 test("sends the rest of an account after one failure", async () => {

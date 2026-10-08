@@ -1,9 +1,9 @@
 import { Api, Logger, TelegramClient, password } from "teleproto";
 import { LogLevel } from "teleproto/extensions/Logger";
 import { StringSession } from "teleproto/sessions";
-import { demoChats, demoFails, isDemoAccount } from "./demo-data";
+import { demoChats, demoFails, demoPosts, isDemoAccount } from "./demo-data";
 import { explain } from "./errors";
-import { classifyChat, LIMITS, normalizePhone, type RawChat } from "./policy";
+import { classifyChat, LIMITS, normalizePhone, readablePost, type RawChat } from "./policy";
 import {
   deleteStoredAccount,
   getConfig,
@@ -11,7 +11,7 @@ import {
   upsertAccount,
   type StoredAccount,
 } from "./store";
-import type { ChatPublic } from "./types";
+import type { ChatPublic, PostPublic } from "./types";
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
@@ -141,7 +141,7 @@ async function persistSession(
   if (!exists && stored.length >= LIMITS.maxAccounts) {
     live().pending.delete(loginId);
     await client.logOut().catch(() => client.destroy().catch(() => undefined));
-    throw new Error(`最多同时登录 ${LIMITS.maxAccounts} 个账号，请先退出一个`);
+    throw new Error(`最多登录 ${LIMITS.maxAccounts} 个账号，请先退出一个`);
   }
   const session = client.session.save();
   if (!session) throw new Error("无法保存登录会话");
@@ -182,7 +182,7 @@ export async function startLogin(phoneInput: string) {
   if (!phone) throw new Error("手机号需要带国家码，例如 +8613800138000");
   const stored = await listStoredAccounts();
   if (stored.length >= LIMITS.maxAccounts) {
-    throw new Error(`最多同时登录 ${LIMITS.maxAccounts} 个账号，请先退出一个`);
+    throw new Error(`最多登录 ${LIMITS.maxAccounts} 个账号，请先退出一个`);
   }
 
   const { apiId, apiHash } = await credentials();
@@ -349,6 +349,44 @@ export async function listChats(accountId: string): Promise<ChatPublic[]> {
   );
   live().peers.set(accountId, peers);
   return chats;
+}
+
+export async function listPosts(
+  accountId: string,
+  chatId: string,
+): Promise<{ chat: ChatPublic; posts: PostPublic[] }> {
+  const chats = await listChats(accountId);
+  const chat = chats.find((item) => item.id === chatId);
+  if (!chat) throw new Error("找不到这个频道，请刷新列表");
+  if (chat.kind !== "channel") throw new Error("自动浏览只用于已经加入的频道");
+  if (chat.reason?.includes("退出") || chat.reason?.includes("无权")) {
+    throw new Error("这个频道已经退出，不能浏览");
+  }
+  if (isDemoAccount(accountId)) {
+    return { chat, posts: demoPosts(accountId, chatId) };
+  }
+  const peer = live().peers.get(accountId)?.get(chatId);
+  if (!peer) throw new Error("找不到这个频道，请刷新列表");
+  const client = await connectAccount(accountId);
+  let messages: { className?: string; id?: number; message?: string; date?: number; views?: number; media?: { className?: string } | null }[];
+  try {
+    messages = await client.getMessages(peer, { limit: 30 });
+  } catch (error) {
+    throw new Error(explain(error));
+  }
+  const posts = messages
+    .map((message) =>
+      readablePost({
+        className: message.className,
+        id: message.id,
+        message: message.message,
+        date: message.date,
+        views: message.views,
+        mediaClass: message.media?.className,
+      }),
+    )
+    .filter((post): post is PostPublic => post !== null);
+  return { chat, posts };
 }
 
 export async function sendTo(accountId: string, chatId: string, message: string) {

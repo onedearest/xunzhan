@@ -20,7 +20,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "讯栈 · Telegram 多账号群发",
-  description: "登录多个 Telegram 账号，把一条消息按间隔发到你已经加入的群。",
+  description: "登录多个 Telegram 账号，轮流把一条消息发到已经加入的群，并在本窗口浏览已加入的频道。",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

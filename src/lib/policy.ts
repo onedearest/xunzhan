@@ -1,4 +1,4 @@
-import type { ChatKind, ChatPublic, Delivery, Job } from "./types";
+import type { ChatKind, ChatPublic, Delivery, Job, PostPublic } from "./types";
 
 export const LIMITS = {
   minIntervalSec: 8,
@@ -6,7 +6,8 @@ export const LIMITS = {
   maxIntervalSec: 180,
   maxTargets: 60,
   maxPerAccount: 20,
-  maxAccounts: 8,
+  maxAccounts: 50,
+  maxScheduleDays: 7,
   maxMessageLength: 4096,
 };
 
@@ -155,7 +156,7 @@ export function planBatch(input: {
       ok: false,
       error: demoOnly
         ? `演示模式的间隔要在 ${LIMITS.demoMinIntervalSec} 到 ${LIMITS.maxIntervalSec} 秒之间`
-        : `同一账号的发送间隔不能短于 ${LIMITS.minIntervalSec} 秒`,
+        : `每条消息之间的间隔不能短于 ${LIMITS.minIntervalSec} 秒`,
     };
   }
 
@@ -187,7 +188,54 @@ export function planBatch(input: {
     }
   }
 
-  return { ok: true, message, intervalSec: input.intervalSec, deliveries };
+  return {
+    ok: true,
+    message,
+    intervalSec: input.intervalSec,
+    deliveries: roundRobinOrder(deliveries),
+  };
+}
+
+export function parseSchedule(
+  value: unknown,
+  now = Date.now(),
+): { ok: true; at?: string } | { ok: false; error: string } {
+  if (value == null || value === "") return { ok: true };
+  if (typeof value !== "string") return { ok: false, error: "发送时间不正确" };
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return { ok: false, error: "发送时间不正确" };
+  if (time < now - 30_000) return { ok: false, error: "这个时间已经过了" };
+  const horizon = now + LIMITS.maxScheduleDays * 24 * 60 * 60 * 1000;
+  if (time > horizon) {
+    return { ok: false, error: `定时最远只能设到 ${LIMITS.maxScheduleDays} 天内` };
+  }
+  return { ok: true, at: new Date(time).toISOString() };
+}
+
+export function roundRobinOrder(deliveries: Delivery[]): Delivery[] {
+  const queues = new Map<string, Delivery[]>();
+  const order: string[] = [];
+  for (const delivery of deliveries) {
+    let queue = queues.get(delivery.accountId);
+    if (!queue) {
+      queue = [];
+      queues.set(delivery.accountId, queue);
+      order.push(delivery.accountId);
+    }
+    queue.push(delivery);
+  }
+  const result: Delivery[] = [];
+  while (result.length < deliveries.length) {
+    let progressed = false;
+    for (const accountId of order) {
+      const next = queues.get(accountId)?.shift();
+      if (!next) continue;
+      result.push(next);
+      progressed = true;
+    }
+    if (!progressed) break;
+  }
+  return result;
 }
 
 export function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -217,38 +265,30 @@ export async function runDeliveries(options: {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }): Promise<void> {
   const wait = options.sleep ?? sleep;
-  const groups = new Map<string, Delivery[]>();
-  for (const delivery of options.deliveries) {
-    const list = groups.get(delivery.accountId) ?? [];
-    list.push(delivery);
-    groups.set(delivery.accountId, list);
+  const sequence = roundRobinOrder(options.deliveries);
+  for (let index = 0; index < sequence.length; index += 1) {
+    const delivery = sequence[index];
+    if (options.signal.aborted) {
+      delivery.status = "skipped";
+      delivery.error = "已停止";
+      options.onUpdate?.();
+      continue;
+    }
+    delivery.status = "sending";
+    options.onUpdate?.();
+    try {
+      await options.send(delivery);
+      delivery.status = "ok";
+      delivery.sentAt = new Date().toISOString();
+    } catch (error) {
+      delivery.status = "error";
+      delivery.error = error instanceof Error ? error.message : "发送失败";
+    }
+    options.onUpdate?.();
+    if (index < sequence.length - 1 && !options.signal.aborted) {
+      await wait(options.intervalMs, options.signal);
+    }
   }
-
-  await Promise.all(
-    [...groups.values()].map(async (list) => {
-      for (let index = 0; index < list.length; index += 1) {
-        const delivery = list[index];
-        if (options.signal.aborted) {
-          delivery.status = "skipped";
-          delivery.error = "已停止";
-          options.onUpdate?.();
-          continue;
-        }
-        delivery.status = "sending";
-        options.onUpdate?.();
-        try {
-          await options.send(delivery);
-          delivery.status = "ok";
-          delivery.sentAt = new Date().toISOString();
-        } catch (error) {
-          delivery.status = "error";
-          delivery.error = error instanceof Error ? error.message : "发送失败";
-        }
-        options.onUpdate?.();
-        if (index < list.length - 1) await wait(options.intervalMs, options.signal);
-      }
-    }),
-  );
 }
 
 export function finishStatus(deliveries: Delivery[], aborted: boolean): Job["status"] {
@@ -262,6 +302,35 @@ export function finishStatus(deliveries: Delivery[], aborted: boolean): Job["sta
     return "failed";
   }
   return "done";
+}
+
+export function readablePost(input: {
+  className?: string;
+  id?: number | string;
+  message?: string;
+  date?: number;
+  views?: number;
+  mediaClass?: string;
+}): PostPublic | null {
+  if (input.className !== "Message") return null;
+  const text = typeof input.message === "string" ? input.message.trim() : "";
+  const media = mediaLabel(input.mediaClass);
+  const body = text || (media ? `〔${media}〕` : "");
+  if (!body) return null;
+  const seconds = typeof input.date === "number" ? input.date : 0;
+  return {
+    id: String(input.id ?? body.slice(0, 24)),
+    text: body,
+    date: new Date(seconds * 1000).toISOString(),
+    ...(typeof input.views === "number" ? { views: input.views } : {}),
+  };
+}
+
+function mediaLabel(className?: string) {
+  if (className === "MessageMediaPhoto") return "图片";
+  if (className === "MessageMediaDocument") return "文件";
+  if (className === "MessageMediaWebPage") return "链接";
+  return "";
 }
 
 export function jobSummary(job: Job) {

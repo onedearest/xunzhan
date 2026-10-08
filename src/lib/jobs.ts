@@ -1,5 +1,5 @@
 import { listAccounts } from "./accounts";
-import { finishStatus, planBatch, runDeliveries } from "./policy";
+import { finishStatus, parseSchedule, planBatch, runDeliveries, sleep } from "./policy";
 import { readJobs, writeJobs } from "./store";
 import { listChats, sendTo } from "./telegram";
 import type { Job } from "./types";
@@ -35,7 +35,7 @@ async function ensureLoaded() {
   const stored = await readJobs();
   const now = new Date().toISOString();
   state.jobs = stored.map((job) => {
-    if (job.status !== "running") return job;
+    if (job.status !== "running" && job.status !== "scheduled") return job;
     return {
       ...job,
       status: "stopped" as const,
@@ -69,13 +69,16 @@ export function createJob(input: {
   message: string;
   intervalSec: number;
   confirmed: boolean;
+  scheduledAt?: unknown;
   selections: { accountId: string; chatIds: string[] }[];
 }): Promise<Job> {
   return exclusive(async () => {
     await ensureLoaded();
-    if (runtime().jobs.some((job) => job.status === "running")) {
+    if (runtime().jobs.some((job) => job.status === "running" || job.status === "scheduled")) {
       throw new Error("已有发送任务在进行，先等它完成或停止");
     }
+    const schedule = parseSchedule(input.scheduledAt);
+    if (!schedule.ok) throw new Error(schedule.error);
     const accounts = await listAccounts();
     const merged = new Map<string, string[]>();
     for (const selection of input.selections) {
@@ -110,8 +113,9 @@ export function createJob(input: {
       id: crypto.randomUUID(),
       message: plan.message,
       intervalSec: plan.intervalSec,
-      status: "running",
+      status: schedule.at ? "scheduled" : "running",
       createdAt: new Date().toISOString(),
+      scheduledAt: schedule.at,
       deliveries: plan.deliveries,
     };
     const controller = new AbortController();
@@ -125,6 +129,22 @@ export function createJob(input: {
 
 async function execute(job: Job, controller: AbortController) {
   try {
+    if (job.scheduledAt) {
+      const waitMs = new Date(job.scheduledAt).getTime() - Date.now();
+      if (waitMs > 0) await sleep(waitMs, controller.signal);
+      if (controller.signal.aborted) {
+        for (const delivery of job.deliveries) {
+          if (delivery.status === "pending" || delivery.status === "sending") {
+            delivery.status = "skipped";
+            delivery.error = "已停止";
+          }
+        }
+        job.status = "stopped";
+        return;
+      }
+      job.status = "running";
+      await persist();
+    }
     await runDeliveries({
       deliveries: job.deliveries,
       intervalMs: job.intervalSec * 1000,

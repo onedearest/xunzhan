@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ChevronsUpDown,
   CircleAlert,
   Loader2,
   Menu,
@@ -41,8 +42,11 @@ import type {
   ChatKind,
   ChatPublic,
   Job,
+  PostPublic,
   SettingsView,
 } from "@/lib/types";
+
+type DeskMode = "send" | "browse";
 
 type ChatState = {
   status: "loading" | "ready" | "error";
@@ -75,9 +79,19 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function formatDuration(seconds: number) {
-  if (seconds <= 0) return "点下去就会发完";
   if (seconds < 60) return `大约 ${seconds} 秒`;
   return `大约 ${Math.ceil(seconds / 60)} 分钟`;
+}
+
+function queueLabel(count: number, intervalSec: number, scheduled: boolean) {
+  if (count <= 0) return "先在左侧勾选";
+  const prefix = scheduled ? "到点后轮流发完，" : "轮流发完，";
+  if (count === 1) return `${prefix}只有一条，不会再等间隔`;
+  return `${prefix}${formatDuration((count - 1) * intervalSec)}`;
+}
+
+function activeJob(jobs: Job[]) {
+  return jobs.find((item) => item.status === "running" || item.status === "scheduled") ?? null;
 }
 
 function formatWhen(iso: string) {
@@ -105,7 +119,10 @@ export function Desk() {
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [intervalSec, setIntervalSec] = useState(LIMITS.minIntervalSec);
+  const [scheduledLocal, setScheduledLocal] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [mode, setMode] = useState<DeskMode>("send");
+  const [browseId, setBrowseId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [history, setHistory] = useState<Job[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -119,9 +136,8 @@ export function Desk() {
   const applyBootstrap = useCallback((data: Bootstrap) => {
     setSettings(data.settings);
     setAccounts(data.accounts);
-    setHistory(data.jobs.filter((item) => item.status !== "running"));
-    const running = data.jobs.find((item) => item.status === "running") ?? null;
-    setJob(running);
+    setHistory(data.jobs.filter((item) => item.status !== "running" && item.status !== "scheduled"));
+    setJob(activeJob(data.jobs));
     setActiveId((current) => {
       if (current && data.accounts.some((account) => account.id === current)) return current;
       return data.accounts[0]?.id ?? null;
@@ -188,7 +204,8 @@ export function Desk() {
     void loadChats(activeId);
   }, [activeId, chats, loadChats]);
 
-  const watchedJobId = job?.status === "running" ? job.id : null;
+  const watchedJobId =
+    job?.status === "running" || job?.status === "scheduled" ? job.id : null;
   useEffect(() => {
     if (!watchedJobId) return;
     let stop = false;
@@ -210,7 +227,9 @@ export function Desk() {
     const marker = `${job.id}:${job.status}`;
     const previous = previousJob.current;
     previousJob.current = marker;
-    if (previous !== `${job.id}:running` || job.status === "running") return;
+    if (previous !== `${job.id}:running` || job.status === "running" || job.status === "scheduled") {
+      return;
+    }
     const summary = jobSummary(job);
     if (job.status === "stopped") toast("发送已停止");
     else if (summary.error) toast.warning(`发出 ${summary.ok} 条，失败 ${summary.error} 条`);
@@ -221,13 +240,15 @@ export function Desk() {
   const active = accounts.find((account) => account.id === activeId) ?? null;
   const chatState = activeId ? chats[activeId] : undefined;
   const visibleChats = useMemo(() => {
-    const list = chatState?.chats ?? [];
+    const list = (chatState?.chats ?? []).filter((chat) =>
+      mode === "browse" ? chat.kind === "channel" : true,
+    );
     const needle = query.trim().toLowerCase();
     if (!needle) return list;
     return list.filter((chat) =>
       `${chat.title} ${chat.username ?? ""}`.toLowerCase().includes(needle),
     );
-  }, [chatState, query]);
+  }, [chatState, query, mode]);
 
   const selectedAccounts = accounts.filter((account) => (selected[account.id]?.length ?? 0) > 0);
   const selectedCount = selectedAccounts.reduce(
@@ -237,7 +258,11 @@ export function Desk() {
   const demoOnly =
     selectedAccounts.length > 0 && selectedAccounts.every((account) => account.demo);
   const minInterval = demoOnly ? LIMITS.demoMinIntervalSec : LIMITS.minIntervalSec;
-  const running = job?.status === "running";
+  const running = job?.status === "running" || job?.status === "scheduled";
+  const browseChat =
+    mode === "browse" && activeId
+      ? (chatState?.chats.find((chat) => chat.id === browseId && chat.kind === "channel") ?? null)
+      : null;
 
   useEffect(() => {
     if (intervalSec < minInterval) setIntervalSec(minInterval);
@@ -308,12 +333,22 @@ export function Desk() {
       const selections = accounts
         .map((account) => ({ accountId: account.id, chatIds: selected[account.id] ?? [] }))
         .filter((selection) => selection.chatIds.length > 0);
+      let scheduledAt: string | null = null;
+      if (scheduledLocal) {
+        const when = new Date(scheduledLocal);
+        if (Number.isNaN(when.getTime())) {
+          toast.error("发送时间不正确");
+          return;
+        }
+        scheduledAt = when.toISOString();
+      }
       const data = await api<{ job: Job }>("/api/jobs", {
         method: "POST",
         body: JSON.stringify({
           message,
           intervalSec,
           confirmed,
+          scheduledAt,
           selections,
         }),
       });
@@ -343,11 +378,6 @@ export function Desk() {
     }
     setLoginOpen(true);
   }
-
-  const longest = selectedAccounts.reduce((max, account) => {
-    const count = selected[account.id]?.length ?? 0;
-    return Math.max(max, Math.max(count - 1, 0) * intervalSec);
-  }, 0);
 
   if (booting) {
     return (
@@ -460,62 +490,93 @@ export function Desk() {
               ) : null}
             </header>
 
-            <div className="flex items-center gap-2 border-b border-border px-4 py-3 lg:px-6">
+            <div className="space-y-2 border-b border-border px-4 py-3 lg:px-6">
+              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 rounded-lg border border-border p-0.5">
+                <button
+                  type="button"
+                  className={`rounded-md px-2.5 py-1 text-xs ${mode === "send" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                  onClick={() => setMode("send")}
+                >
+                  群发
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-md px-2.5 py-1 text-xs ${mode === "browse" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                  onClick={() => setMode("browse")}
+                >
+                  浏览
+                </button>
+              </div>
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索群名或用户名"
+                  placeholder={mode === "browse" ? "搜索频道" : "搜索群名或用户名"}
                   className="h-9 pl-8"
-                  aria-label="搜索群"
+                  aria-label={mode === "browse" ? "搜索频道" : "搜索群"}
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={selectVisible}>
-                全选可发
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => activeId && setSelected((current) => ({ ...current, [activeId]: [] }))}
-              >
-                清空
-              </Button>
+              </div>
+              {mode === "send" ? (
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={selectVisible}>
+                    全选可发
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => activeId && setSelected((current) => ({ ...current, [activeId]: [] }))}
+                  >
+                    清空
+                  </Button>
+                </div>
+              ) : null}
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 lg:px-4">
               <ChatList
+                mode={mode}
                 state={chatState}
                 chats={visibleChats}
                 selected={activeId ? (selected[activeId] ?? []) : []}
+                browsingId={browseChat?.id ?? null}
                 job={job}
                 accountId={activeId}
                 onToggle={(chatId) => activeId && toggleChat(activeId, chatId)}
+                onBrowse={setBrowseId}
                 onRetry={() => activeId && void loadChats(activeId)}
               />
             </div>
           </section>
 
-          <Composer
-            message={message}
-            intervalSec={intervalSec}
-            minInterval={minInterval}
-            confirmed={confirmed}
-            selectedCount={selectedCount}
-            accountCount={selectedAccounts.length}
-            estimate={formatDuration(longest)}
-            running={running}
-            sending={sending}
-            job={job}
-            history={history}
-            onMessage={setMessage}
-            onInterval={setIntervalSec}
-            onConfirmed={setConfirmed}
-            onSend={() => void send()}
-            onStop={() => void stop()}
-            onClearJob={() => setJob(null)}
-            onOpenJob={setJob}
-          />
+          {mode === "browse" ? (
+            <Reader accountId={activeId} chat={browseChat} />
+          ) : (
+            <Composer
+              message={message}
+              intervalSec={intervalSec}
+              minInterval={minInterval}
+              confirmed={confirmed}
+              selectedCount={selectedCount}
+              accountCount={selectedAccounts.length}
+              scheduledLocal={scheduledLocal}
+              estimate={queueLabel(selectedCount, intervalSec, Boolean(scheduledLocal))}
+              running={running}
+              sending={sending}
+              job={job}
+              history={history}
+              onMessage={setMessage}
+              onInterval={setIntervalSec}
+              onScheduled={setScheduledLocal}
+              onConfirmed={setConfirmed}
+              onSend={() => void send()}
+              onStop={() => void stop()}
+              onClearJob={() => setJob(null)}
+              onOpenJob={setJob}
+            />
+          )}
         </div>
       )}
 
@@ -649,20 +710,26 @@ function AccountRail({
 }
 
 function ChatList({
+  mode,
   state,
   chats,
   selected,
+  browsingId,
   job,
   accountId,
   onToggle,
+  onBrowse,
   onRetry,
 }: {
+  mode: DeskMode;
   state?: ChatState;
   chats: ChatPublic[];
   selected: string[];
+  browsingId: string | null;
   job: Job | null;
   accountId: string | null;
   onToggle: (chatId: string) => void;
+  onBrowse: (chatId: string) => void;
   onRetry: () => void;
 }) {
   if (!state || (state.status === "loading" && state.chats.length === 0)) {
@@ -702,8 +769,45 @@ function ChatList({
   if (chats.length === 0) {
     return (
       <div className="grid min-h-64 place-items-center px-6 text-center">
-        <p className="text-sm text-muted-foreground">没有匹配的群</p>
+        <p className="text-sm text-muted-foreground">
+          {mode === "browse" ? "没有可浏览的频道" : "没有匹配的群"}
+        </p>
       </div>
+    );
+  }
+
+  if (mode === "browse") {
+    return (
+      <ul className="space-y-1">
+        {chats.map((chat) => {
+          const closed = Boolean(chat.reason?.includes("退出") || chat.reason?.includes("无权"));
+          const on = chat.id === browsingId;
+          return (
+            <li key={chat.id}>
+              <button
+                type="button"
+                disabled={closed}
+                onClick={() => onBrowse(chat.id)}
+                className={`flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left ${
+                  closed ? "cursor-not-allowed opacity-60" : "hover:bg-card"
+                } ${on ? "bg-card ring-1 ring-primary/30" : ""}`}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate font-medium">{chat.title}</span>
+                    <Badge variant="outline">频道</Badge>
+                    {!chat.canPost && !closed ? <Badge variant="secondary">只读</Badge> : null}
+                  </span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {chat.username ? `@${chat.username} · ` : ""}
+                    {closed ? chat.reason : "打开后在右侧上下滚动，不会增加阅读数"}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     );
   }
 
@@ -759,6 +863,164 @@ function DeliveryBadge({ status }: { status: Job["deliveries"][number]["status"]
   return <Badge variant="outline">排队</Badge>;
 }
 
+function Reader({ accountId, chat }: { accountId: string | null; chat: ChatPublic | null }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const direction = useRef<1 | -1>(1);
+  const requestId = useRef(0);
+  const [reloadToken, setReloadToken] = useState(0);
+  const chatKey = accountId && chat ? `${accountId}:${chat.id}:${reloadToken}` : "";
+  const [session, setSession] = useState<{
+    key: string;
+    posts: PostPublic[];
+    status: "idle" | "loading" | "ready" | "error";
+    error: string | null;
+    auto: boolean;
+  }>({ key: "", posts: [], status: "idle", error: null, auto: false });
+  let view = session;
+  if (session.key !== chatKey) {
+    view = {
+      key: chatKey,
+      posts: [],
+      status: chatKey ? "loading" : "idle",
+      error: null,
+      auto: false,
+    };
+    setSession(view);
+  }
+  const posts = view.posts;
+  const status = view.status;
+  const error = view.error;
+  const auto = view.auto;
+
+  useEffect(() => {
+    direction.current = 1;
+    if (scroller.current) scroller.current.scrollTop = 0;
+    if (!chatKey || !accountId || !chat) return;
+    const current = ++requestId.current;
+    let cancelled = false;
+    void api<{ posts: PostPublic[] }>(
+      `/api/accounts/${encodeURIComponent(accountId)}/posts?chatId=${encodeURIComponent(chat.id)}`,
+    )
+      .then((data) => {
+        if (cancelled || current !== requestId.current) return;
+        setSession((currentSession) =>
+          currentSession.key === chatKey
+            ? { ...currentSession, posts: data.posts, status: "ready", error: null }
+            : currentSession,
+        );
+      })
+      .catch((reason: unknown) => {
+        if (cancelled || current !== requestId.current) return;
+        setSession((currentSession) =>
+          currentSession.key === chatKey
+            ? {
+                ...currentSession,
+                posts: [],
+                status: "error",
+                error: reason instanceof Error ? reason.message : "帖子没有加载出来",
+              }
+            : currentSession,
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, chat, chatKey]);
+
+  useEffect(() => {
+    if (!auto) return;
+    let frame = 0;
+    let last = performance.now();
+    const step = (now: number) => {
+      const el = scroller.current;
+      const delta = ((now - last) / 1000) * 72;
+      last = now;
+      if (el) {
+        const max = el.scrollHeight - el.clientHeight;
+        if (max > 4) {
+          let next = el.scrollTop + delta * direction.current;
+          if (next >= max) {
+            next = max;
+            direction.current = -1;
+          } else if (next <= 0) {
+            next = 0;
+            direction.current = 1;
+          }
+          el.scrollTop = next;
+        }
+      }
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [auto]);
+
+  return (
+    <aside className="flex max-h-[52dvh] min-h-0 flex-col border-t border-border bg-card lg:max-h-none lg:border-t-0">
+      <div className="border-b border-border px-4 py-4 lg:px-5">
+        <p className="font-heading text-2xl leading-none">浏览频道</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {chat ? chat.title : "选一个已经加入的频道。"}
+          自动浏览只在这个窗口里上下滑动，不标记已读，也不增加阅读数。
+        </p>
+      </div>
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 lg:px-5">
+        {!chat ? (
+          <div className="grid min-h-48 place-items-center text-center">
+            <p className="text-sm text-muted-foreground">左侧点一个频道，这里会列出最近的帖子。</p>
+          </div>
+        ) : status === "loading" ? (
+          <div className="space-y-2" aria-busy="true">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="h-20 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        ) : status === "error" ? (
+          <div className="grid min-h-48 place-items-center text-center">
+            <div>
+              <CircleAlert className="mx-auto size-5 text-destructive" />
+              <p className="mt-3 text-sm">{error}</p>
+              <Button className="mt-4" variant="outline" onClick={() => setReloadToken((value) => value + 1)}>
+                重试
+              </Button>
+            </div>
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="grid min-h-48 place-items-center text-center">
+            <p className="text-sm text-muted-foreground">这个频道最近没有文字或图片帖。</p>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {posts.map((post) => (
+              <li key={post.id} className="rounded-lg border border-border bg-background px-3 py-3">
+                <p className="text-sm leading-6 whitespace-pre-wrap">{post.text}</p>
+                <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+                  {formatWhen(post.date)}
+                  {typeof post.views === "number" ? ` · 已有 ${post.views.toLocaleString("zh-CN")} 次阅读` : ""}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="shrink-0 border-t border-border px-4 py-3 lg:px-5">
+        <Button
+          className="h-10 w-full"
+          variant={auto ? "destructive" : "default"}
+          disabled={!chat || status !== "ready" || posts.length === 0}
+          onClick={() => {
+            direction.current = 1;
+            setSession((current) => ({ ...current, auto: !current.auto }));
+          }}
+        >
+          {auto ? <Square /> : <ChevronsUpDown />}
+          {auto ? "停止滑动" : "自动上下浏览"}
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
 function Composer({
   message,
   intervalSec,
@@ -766,6 +1028,7 @@ function Composer({
   confirmed,
   selectedCount,
   accountCount,
+  scheduledLocal,
   estimate,
   running,
   sending,
@@ -773,6 +1036,7 @@ function Composer({
   history,
   onMessage,
   onInterval,
+  onScheduled,
   onConfirmed,
   onSend,
   onStop,
@@ -785,6 +1049,7 @@ function Composer({
   confirmed: boolean;
   selectedCount: number;
   accountCount: number;
+  scheduledLocal: string;
   estimate: string;
   running: boolean;
   sending: boolean;
@@ -792,6 +1057,7 @@ function Composer({
   history: Job[];
   onMessage: (value: string) => void;
   onInterval: (value: number) => void;
+  onScheduled: (value: string) => void;
   onConfirmed: (value: boolean) => void;
   onSend: () => void;
   onStop: () => void;
@@ -806,7 +1072,7 @@ function Composer({
         <div>
           <p className="font-heading text-2xl leading-none">发出去</p>
           <p className="mt-2 text-sm text-muted-foreground">
-            点一次开始，同一账号会按间隔自动发完。不同账号同时进行。
+            每个账号先发一条，再换下一个。全部轮过一遍，才发各自的下一条。每条之间都等这个间隔。
           </p>
         </div>
         <div className="space-y-2">
@@ -826,7 +1092,7 @@ function Composer({
         </div>
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <Label htmlFor="interval">同一账号的间隔</Label>
+            <Label htmlFor="interval">每条之间的间隔</Label>
             <span className="tabular-nums">{intervalSec} 秒</span>
           </div>
           <input
@@ -842,8 +1108,33 @@ function Composer({
           />
           <p className="text-xs text-muted-foreground">
             {minInterval === 1
-              ? "演示数据可以把间隔调到 1 秒。真实账号最短 8 秒。"
-              : `真实账号最短 ${LIMITS.minIntervalSec} 秒，每个账号最多 ${LIMITS.maxPerAccount} 个群，单次最多 ${LIMITS.maxTargets} 个。`}
+              ? "演示数据可以把间隔调到 1 秒。真实账号最短 8 秒，账号之间也要等。"
+              : `真实账号最短 ${LIMITS.minIntervalSec} 秒。每个账号最多 ${LIMITS.maxPerAccount} 个群，单次最多 ${LIMITS.maxTargets} 个，登录槽最多 ${LIMITS.maxAccounts} 个。`}
+          </p>
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="when">定时开始</Label>
+            {scheduledLocal ? (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline"
+                disabled={running}
+                onClick={() => onScheduled("")}
+              >
+                改为立刻
+              </button>
+            ) : null}
+          </div>
+          <Input
+            id="when"
+            type="datetime-local"
+            value={scheduledLocal}
+            disabled={running}
+            onChange={(event) => onScheduled(event.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            留空就马上开始。设定后，到点才轮流发送，最远 {LIMITS.maxScheduleDays} 天。关掉窗口会取消还没开始的定时。
           </p>
         </div>
         <label className="flex items-start gap-2 rounded-lg border border-border bg-background px-3 py-3 text-sm">
@@ -868,7 +1159,7 @@ function Composer({
         {running ? (
           <Button variant="destructive" className="h-10 w-full" onClick={onStop}>
             <Square />
-            停止发送
+            {job?.status === "scheduled" ? "取消定时" : "停止发送"}
           </Button>
         ) : (
           <Button
@@ -884,8 +1175,10 @@ function Composer({
           <div className="space-y-3 rounded-lg border border-border bg-background p-3" aria-live="polite">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-medium">
-                {job.status === "running"
-                  ? "正在按间隔发送"
+                {job.status === "scheduled"
+                  ? `等到 ${job.scheduledAt ? formatWhen(job.scheduledAt) : "设定时间"} 再开始`
+                  : job.status === "running"
+                  ? "正在轮流发送"
                   : job.status === "stopped"
                     ? "已停止"
                     : job.status === "failed"
@@ -981,14 +1274,14 @@ function Onboarding({
             把一条消息，送到你负责的每一个群。
           </h1>
           <p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">
-            讯栈可以同时登录多个 Telegram 账号。勾选已经加入的群，它会按间隔自动发完。它不会自动加群，也不会给陌生人发私信。
+            讯栈可以登录最多 {LIMITS.maxAccounts} 个 Telegram 账号。勾选已经加入的群，账号会轮流发言。它不会自动加群，也不会给陌生人发私信。
           </p>
         </div>
         <ol className="grid gap-3 sm:grid-cols-3">
           {[
             ["01", "填入应用凭证", "用 my.telegram.org 的 api_id 和 api_hash。"],
             ["02", "登录多个账号", "手机号、验证码，有两步验证就再填一次密码。"],
-            ["03", "按间隔发出", "每个账号单独排队，最短 8 秒一条。"],
+            ["03", "轮流发出", "一个账号发一条，再换下一个。每条之间最短 8 秒。"],
           ].map(([index, title, copy]) => (
             <li key={index} className="rounded-xl border border-border bg-card p-4">
               <p className="font-heading text-lg text-primary">{index}</p>

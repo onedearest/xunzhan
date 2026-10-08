@@ -15,6 +15,7 @@ export async function POST(request: Request) {
       message?: unknown;
       intervalSec?: unknown;
       confirmed?: unknown;
+      scheduledAt?: unknown;
       selections?: unknown;
     };
     if (typeof body.message !== "string") throw new HttpError(400, "先写好要发送的内容");
@@ -35,6 +36,7 @@ export async function POST(request: Request) {
       message: body.message,
       intervalSec: body.intervalSec,
       confirmed: body.confirmed,
+      scheduledAt: body.scheduledAt,
       selections,
     });
     return json({ job }, 201);

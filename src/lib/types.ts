@@ -31,7 +31,7 @@ export type Delivery = {
   sentAt?: string;
 };
 
-export type JobStatus = "running" | "done" | "stopped" | "failed";
+export type JobStatus = "scheduled" | "running" | "done" | "stopped" | "failed";
 
 export type Job = {
   id: string;
@@ -39,8 +39,16 @@ export type Job = {
   intervalSec: number;
   status: JobStatus;
   createdAt: string;
+  scheduledAt?: string;
   finishedAt?: string;
   deliveries: Delivery[];
+};
+
+export type PostPublic = {
+  id: string;
+  text: string;
+  date: string;
+  views?: number;
 };
 
 export type SettingsView = {

@@ -1,4 +1,4 @@
-import type { AccountPublic, ChatPublic } from "./types";
+import type { AccountPublic, ChatPublic, PostPublic } from "./types";
 
 export const demoAccounts: AccountPublic[] = [
   {
@@ -105,6 +105,47 @@ export function isDemoAccount(id: string): boolean {
 
 export function demoChats(accountId: string): ChatPublic[] {
   return chats[accountId] ?? [];
+}
+
+const posts: Record<string, string[]> = {
+  "demo-lin-log": [
+    "本周版本已经合入设置页。登录态仍只保存在这台电脑的 data 目录。",
+    "周会纪要：群发改成轮流。林夏先发一条，周衡再发一条，中间留间隔。",
+    "设计批评小组留下三条意见，字体和边距已经按纸面色改过。",
+    "用户反馈收集里，有人希望定时到明早九点再发。定时只在窗口开着时生效。",
+    "产品日志这条是频道帖。在讯栈里打开它，只会滚动本窗口，不会去刷阅读数。",
+    "慢速模式的群如果发得太密，会记成失败，后面的群继续排队。",
+    "演示账号不会连接 Telegram。关掉演示后，这些群和帖子都会消失。",
+    "下一轮只改文案长度。单条仍限制在 4096 个字符以内。",
+    "登录槽放到 50 个，是为了把账号放在同一张桌子上切换。单次发送仍然有上限。",
+    "定时如果设在明早，窗口要一直开着。服务重启后，还没开始的那一轮会取消。",
+    "产品日志往下还有旧帖。自动浏览滑到底后会再往上，像用手拨鼠标滚轮。",
+    "这条是列表末尾附近的帖子。如果它出现在窗口下沿，说明列表已经能滚动。",
+  ],
+  "demo-lin-watch": [
+    "行业观察：各家都在把多账号收成一个工作台，切换发言比同时开口更不容易撞车。",
+    "频道帖通常只是往下读。上下滑动是阅读习惯，不是给帖子加热。",
+    "本周值得看的是本地客户端怎么保存会话，而不是把服务暴露到公网。",
+    "慢速模式和频率限制仍然由 Telegram 决定。工作台只是把失败记下来。",
+    "已经退出的频道不会出现在可浏览列表里。",
+    "把鼠标当成翻页：先向下，到底再向上，循环直到你停下。",
+    "只读频道也能打开。没有发帖权限，不影响把历史列出来看。",
+    "阅读数是帖子上原来就有的数字。窗口滚动不会去改它。",
+    "这条再长一点，方便在窄屏幕上把列表撑出滚动条。工作台只负责把已加入频道的历史摊开。",
+    "滑到这里就可以往回看上面的帖子。停止之后，列表停在当前位置。",
+  ],
+};
+
+export function demoPosts(accountId: string, chatId: string): PostPublic[] {
+  if (!isDemoAccount(accountId)) return [];
+  const lines = posts[chatId] ?? [];
+  const now = Date.now();
+  return lines.map((text, index) => ({
+    id: `${chatId}-${index + 1}`,
+    text,
+    date: new Date(now - index * 3_600_000).toISOString(),
+    views: 86 + index * 13,
+  }));
 }
 
 export function demoFails(accountId: string, chatId: string): string | null {
