@@ -391,14 +391,14 @@ export function Desk() {
   );
 
   return (
-    <div className="desk-canvas flex h-dvh min-h-0">
-      <aside className="hidden h-full w-[272px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
+    <div className="desk-canvas flex h-dvh max-h-dvh overflow-hidden">
+      <aside className="hidden h-dvh max-h-dvh min-h-0 w-[272px] shrink-0 overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex lg:flex-col">
         {rail}
       </aside>
       <Sheet open={navOpen} onOpenChange={setNavOpen}>
         <SheetContent
           side="left"
-          className="w-[280px] bg-sidebar p-0 text-sidebar-foreground sm:max-w-none"
+          className="flex h-dvh w-[280px] max-w-[86vw] flex-col overflow-hidden bg-sidebar p-0 text-sidebar-foreground sm:max-w-none"
         >
           <SheetHeader className="sr-only">
             <SheetTitle>账号</SheetTitle>
@@ -568,7 +568,7 @@ function AccountRail({
   onDemo: () => void;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-3 px-4 py-5">
         <span className="grid size-9 place-items-center rounded-md bg-[#f4efe4] font-heading text-lg text-[#1d4a3d]">
           讯
@@ -619,7 +619,7 @@ function AccountRail({
           })
         )}
       </div>
-      <div className="space-y-2 border-t border-sidebar-border p-3">
+      <div className="shrink-0 space-y-2 border-t border-sidebar-border p-3">
         <Button
           variant="secondary"
           className="h-9 w-full bg-[#f4efe4] text-[#1c1915] hover:bg-[#efe6d4]"
@@ -628,23 +628,21 @@ function AccountRail({
           <Plus />
           添加账号
         </Button>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="ghost"
-            className="text-sidebar-foreground hover:bg-white/10 hover:text-sidebar-foreground"
-            onClick={onSettings}
-          >
-            应用凭证
-          </Button>
-          <Button
-            variant="ghost"
-            className="text-sidebar-foreground hover:bg-white/10 hover:text-sidebar-foreground"
-            disabled={demoBusy}
-            onClick={onDemo}
-          >
-            {demo ? "关闭演示" : "演示数据"}
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          className="w-full text-sidebar-foreground hover:bg-white/10 hover:text-sidebar-foreground"
+          onClick={onSettings}
+        >
+          应用凭证
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full text-sidebar-foreground hover:bg-white/10 hover:text-sidebar-foreground"
+          disabled={demoBusy}
+          onClick={onDemo}
+        >
+          {demo ? "关闭演示" : "演示数据"}
+        </Button>
       </div>
     </div>
   );
