@@ -2,10 +2,12 @@
   "name": "xunzhan",
   "version": "0.1.0",
   "private": true,
+  "main": "desktop/main.cjs",
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0 --port 43127",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 43127",
+    "desktop": "electron . --no-sandbox --disable-gpu --disable-dev-shm-usage",
     "lint": "eslint",
     "test": "tsx --test src/lib/policy.test.ts"
   },
@@ -28,6 +30,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^44.7.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
