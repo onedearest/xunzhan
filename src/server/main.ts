@@ -10,6 +10,8 @@ import { POST as cancelLogin } from "../app/api/auth/cancel/route";
 import { POST as submitCode } from "../app/api/auth/code/route";
 import { POST as submitPassword } from "../app/api/auth/password/route";
 import { POST as resendCode } from "../app/api/auth/resend/route";
+import { POST as startBotLogin } from "../app/api/auth/bot/route";
+import { GET as pollQrLogin, POST as startQrLogin } from "../app/api/auth/qr/route";
 import { POST as startLogin } from "../app/api/auth/start/route";
 import { GET as bootstrap } from "../app/api/bootstrap/route";
 import { POST as setDemo } from "../app/api/demo/route";
@@ -45,6 +47,9 @@ async function dispatch(request: Request): Promise<Response | null> {
   if (pathname === "/api/demo" && method === "POST") return setDemo(request);
   if (pathname === "/api/settings" && method === "PUT") return saveSettings(request);
   if (pathname === "/api/auth/start" && method === "POST") return startLogin(request);
+  if (pathname === "/api/auth/qr" && method === "POST") return startQrLogin();
+  if (pathname === "/api/auth/qr" && method === "GET") return pollQrLogin(request);
+  if (pathname === "/api/auth/bot" && method === "POST") return startBotLogin(request);
   if (pathname === "/api/auth/code" && method === "POST") return submitCode(request);
   if (pathname === "/api/auth/password" && method === "POST") return submitPassword(request);
   if (pathname === "/api/auth/resend" && method === "POST") return resendCode(request);

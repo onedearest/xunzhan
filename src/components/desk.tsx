@@ -872,9 +872,13 @@ function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPubli
   const scroller = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
   const [reloadToken, setReloadToken] = useState(0);
-  const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const chatKey = accountId && chat ? `${accountId}:${chat.id}:${reloadToken}` : "";
+  const [draftState, setDraftState] = useState({ key: "", text: "" });
+  const draft = draftState.key === chatKey ? draftState.text : "";
+  function setDraft(text: string) {
+    setDraftState({ key: chatKey, text });
+  }
   const [session, setSession] = useState<{
     key: string;
     posts: PostPublic[];
@@ -888,7 +892,6 @@ function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPubli
   }
 
   useEffect(() => {
-    setDraft("");
     if (!chatKey || !accountId || !chat) return;
     const current = ++requestId.current;
     let cancelled = false;
@@ -1430,11 +1433,11 @@ function Onboarding({
         <div>
           <h1 className="text-2xl font-medium">讯栈</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            用手机号登录 Telegram，最多 {LIMITS.maxAccounts} 个账号。可以打开已有会话单独回复，也可以在群发里轮流发到已经加入的群。不会自动加群。
+            用手机号、扫码或机器人令牌登录，最多 {LIMITS.maxAccounts} 个账号。可以打开已有会话单独回复，也可以在群发里轮流发到已经加入的群。不会自动加群。
           </p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-sm">登录后填写验证码。账号开了两步验证，再填一次密码。</p>
+          <p className="text-sm">手机号会收到验证码。也可以用官方客户端扫码，或贴上 @BotFather 的令牌。</p>
           <Button className="mt-4 h-10 w-full" onClick={onAdd}>
             <Plus />
             登录账号
@@ -1487,7 +1490,7 @@ function CredentialForm({
       <div>
         <p className="font-medium">自己的凭证（可选）</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          留空就用内置凭证，直接用手机号登录。只有自己申请到了 api_id 和 api_hash 才需要填写。
+          留空就用内置凭证，可以直接用手机号、扫码或机器人令牌登录。只有自己申请到了 api_id 和 api_hash 才需要填写。
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -1538,7 +1541,7 @@ function SettingsDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>登录设置</DialogTitle>
-          <DialogDescription>手机号登录不需要先申请 API。</DialogDescription>
+          <DialogDescription>手机号、扫码和机器人登录都不需要先申请 API。</DialogDescription>
         </DialogHeader>
         <CredentialForm
           key={`${settings.apiId ?? ""}:${settings.apiHash}`}
@@ -1553,6 +1556,48 @@ function SettingsDialog({
   );
 }
 
+type LoginStep = "phone" | "code" | "password" | "qr" | "bot";
+
+type QrPoll =
+  | { status: "waiting"; url: string; expires: number }
+  | { status: "password"; hint?: string }
+  | { status: "done"; account: AccountPublic };
+
+function QrPicture({ url }: { url: string }) {
+  const [src, setSrc] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancel = false;
+    void import("qrcode")
+      .then((mod) => {
+        const draw = mod.default?.toDataURL ?? mod.toDataURL;
+        return draw(url, { margin: 1, width: 280, errorCorrectionLevel: "M" });
+      })
+      .then((value) => {
+        if (!cancel) setSrc(value);
+      })
+      .catch(() => {
+        if (!cancel) setFailed(true);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [url]);
+  return (
+    <div className="mx-auto flex h-56 w-56 items-center justify-center rounded-lg border border-border bg-white">
+      {src ? (
+        // The code is a data URL generated in the browser for this login only.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="登录二维码" className="h-52 w-52" />
+      ) : failed ? (
+        <p className="px-3 text-center text-xs text-muted-foreground">二维码没有画出来，请重新生成</p>
+      ) : (
+        <Loader2 className="animate-spin text-muted-foreground" />
+      )}
+    </div>
+  );
+}
+
 function LoginDialog({
   open,
   onOpenChange,
@@ -1562,27 +1607,63 @@ function LoginDialog({
   onOpenChange: (open: boolean) => void;
   onReady: (account: AccountPublic) => void;
 }) {
-  const [step, setStep] = useState<"phone" | "code" | "password">("phone");
+  const [step, setStep] = useState<LoginStep>("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
+  const [botToken, setBotToken] = useState("");
+  const [qrUrl, setQrUrl] = useState("");
+  const [qrBroken, setQrBroken] = useState("");
   const [loginId, setLoginId] = useState<string | null>(null);
-  const loginIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    loginIdRef.current = loginId;
-  }, [loginId]);
   const [hint, setHint] = useState<string | undefined>();
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const loginIdRef = useRef<string | null>(null);
+  const loginSeq = useRef(0);
+  const onReadyRef = useRef(onReady);
+  const onOpenChangeRef = useRef(onOpenChange);
+  const finishRef = useRef<(account: AccountPublic) => void>(() => undefined);
   const skipCancel = useRef(false);
 
-  function reset() {
+  const reset = useCallback(() => {
     setStep("phone");
     setCode("");
     setPassword("");
+    setBotToken("");
+    setQrUrl("");
+    setQrBroken("");
     setLoginId(null);
     setHint(undefined);
     setNotice("");
+  }, []);
+
+  const finish = useCallback(
+    (account: AccountPublic) => {
+      skipCancel.current = true;
+      loginIdRef.current = null;
+      onReadyRef.current(account);
+      onOpenChangeRef.current(false);
+      reset();
+    },
+    [reset],
+  );
+
+  useEffect(() => {
+    loginIdRef.current = loginId;
+    onReadyRef.current = onReady;
+    onOpenChangeRef.current = onOpenChange;
+    finishRef.current = finish;
+  }, [loginId, onReady, onOpenChange, finish]);
+
+  async function dropLogin() {
+    const current = loginIdRef.current;
+    if (!current) return;
+    loginIdRef.current = null;
+    setLoginId(null);
+    await api("/api/auth/cancel", {
+      method: "POST",
+      body: JSON.stringify({ loginId: current }),
+    }).catch(() => undefined);
   }
 
   function handleOpen(next: boolean) {
@@ -1598,6 +1679,82 @@ function LoginDialog({
     }
     onOpenChange(next);
   }
+
+  async function showPhone() {
+    loginSeq.current += 1;
+    await dropLogin();
+    setQrUrl("");
+    setQrBroken("");
+    setStep("phone");
+  }
+
+  async function showBot() {
+    loginSeq.current += 1;
+    await dropLogin();
+    setQrUrl("");
+    setQrBroken("");
+    setStep("bot");
+  }
+
+  async function showQr() {
+    const seq = ++loginSeq.current;
+    await dropLogin();
+    if (seq !== loginSeq.current) return;
+    setStep("qr");
+    setQrUrl("");
+    setQrBroken("");
+    setBusy(true);
+    try {
+      const data = await api<{ loginId: string; url: string }>("/api/auth/qr", { method: "POST" });
+      if (seq !== loginSeq.current) {
+        await api("/api/auth/cancel", {
+          method: "POST",
+          body: JSON.stringify({ loginId: data.loginId }),
+        }).catch(() => undefined);
+        return;
+      }
+      loginIdRef.current = data.loginId;
+      setLoginId(data.loginId);
+      setQrUrl(data.url);
+    } catch (error) {
+      if (seq === loginSeq.current) {
+        setQrBroken(error instanceof Error ? error.message : "没有生成二维码");
+      }
+    } finally {
+      if (seq === loginSeq.current) setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!open || step !== "qr" || !loginId || qrBroken) return;
+    let stop = false;
+    const poll = async () => {
+      try {
+        const data = await api<QrPoll>(`/api/auth/qr?loginId=${encodeURIComponent(loginId)}`);
+        if (stop) return;
+        if (data.status === "waiting") {
+          setQrUrl(data.url);
+          return;
+        }
+        if (data.status === "password") {
+          setHint(data.hint);
+          setStep("password");
+          return;
+        }
+        stop = true;
+        finishRef.current(data.account);
+      } catch (error) {
+        if (stop) return;
+        setQrBroken(error instanceof Error ? error.message : "扫码没有完成");
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1500);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [open, step, loginId, qrBroken]);
 
   async function start() {
     setBusy(true);
@@ -1632,11 +1789,7 @@ function LoginDialog({
         setStep("password");
         return;
       }
-      skipCancel.current = true;
-      loginIdRef.current = null;
-      onReady(data.account);
-      onOpenChange(false);
-      reset();
+      finish(data.account);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "登录失败");
     } finally {
@@ -1652,13 +1805,24 @@ function LoginDialog({
         method: "POST",
         body: JSON.stringify({ loginId, password }),
       });
-      skipCancel.current = true;
-      loginIdRef.current = null;
-      onReady(data.account);
-      onOpenChange(false);
-      reset();
+      finish(data.account);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "密码不正确");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitBot() {
+    setBusy(true);
+    try {
+      const data = await api<{ account: AccountPublic }>("/api/auth/bot", {
+        method: "POST",
+        body: JSON.stringify({ token: botToken }),
+      });
+      finish(data.account);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "机器人登录失败");
     } finally {
       setBusy(false);
     }
@@ -1683,21 +1847,64 @@ function LoginDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {step === "phone" ? "添加账号" : step === "code" ? "填写验证码" : "两步验证"}
+            {step === "code"
+              ? "填写验证码"
+              : step === "password"
+                ? "两步验证"
+                : step === "qr"
+                  ? "扫码登录"
+                  : step === "bot"
+                    ? "机器人登录"
+                    : "添加账号"}
           </DialogTitle>
           <DialogDescription>
             {step === "phone"
               ? "使用带国家码的手机号。验证码会发到已登录的 Telegram，或通过短信。"
-              : step === "code"
-                ? notice || "填入刚刚收到的验证码。"
-                : hint
-                  ? `密码提示：${hint}`
-                  : "这个账号开了两步验证。"}
+              : step === "qr"
+                ? "打开手机上的 Telegram，进入设置 → 设备 → 连接桌面设备，扫描下面的二维码。"
+                : step === "bot"
+                  ? "把 @BotFather 发来的令牌贴在这里。登录后可以管理这个机器人能看到的会话。"
+                  : step === "code"
+                    ? notice || "填入刚刚收到的验证码。"
+                    : hint
+                      ? `密码提示：${hint}`
+                      : "这个账号开了两步验证。"}
           </DialogDescription>
         </DialogHeader>
+        {step === "phone" || step === "qr" || step === "bot" ? (
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              type="button"
+              variant={step === "phone" ? "default" : "outline"}
+              className="h-9"
+              disabled={busy || step === "phone"}
+              onClick={() => void showPhone()}
+            >
+              手机号
+            </Button>
+            <Button
+              type="button"
+              variant={step === "qr" ? "default" : "outline"}
+              className="h-9"
+              disabled={busy || step === "qr"}
+              onClick={() => void showQr()}
+            >
+              扫码
+            </Button>
+            <Button
+              type="button"
+              variant={step === "bot" ? "default" : "outline"}
+              className="h-9"
+              disabled={busy || step === "bot"}
+              onClick={() => void showBot()}
+            >
+              机器人
+            </Button>
+          </div>
+        ) : null}
         {step === "phone" ? (
           <form
             className="space-y-3"
@@ -1778,6 +1985,52 @@ function LoginDialog({
               <Button type="submit" className="h-10" disabled={busy || !password.trim()}>
                 {busy ? <Loader2 className="animate-spin" /> : null}
                 完成登录
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : null}
+        {step === "qr" ? (
+          <div className="space-y-3">
+            {qrUrl && !qrBroken ? <QrPicture key={qrUrl} url={qrUrl} /> : null}
+            {qrBroken ? <p className="text-sm text-destructive">{qrBroken}</p> : null}
+            {!qrUrl && !qrBroken ? (
+              <div className="flex h-56 items-center justify-center">
+                <Loader2 className="animate-spin text-muted-foreground" />
+              </div>
+            ) : null}
+            <p className="text-center text-xs text-muted-foreground">二维码大约每 30 秒更新一次。</p>
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={busy} onClick={() => void showQr()}>
+                {busy ? <Loader2 className="animate-spin" /> : null}
+                重新生成
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : null}
+        {step === "bot" ? (
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitBot();
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="bot-token">机器人令牌</Label>
+              <Input
+                id="bot-token"
+                value={botToken}
+                onChange={(event) => setBotToken(event.target.value)}
+                placeholder="123456789:ABC…"
+                autoComplete="off"
+                spellCheck={false}
+                className="h-10 font-mono text-sm"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="submit" className="h-10" disabled={busy || !botToken.trim()}>
+                {busy ? <Loader2 className="animate-spin" /> : null}
+                登录
               </Button>
             </DialogFooter>
           </form>

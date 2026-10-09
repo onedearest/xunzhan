@@ -2,10 +2,10 @@
 
 讯栈有两个版本：安卓和 Windows。两边是同一套工作台，可以登录最多 50 个账号，把同一条消息轮流发到这些账号已经加入的群和频道，也可以在本窗口里上下浏览已经加入的频道。
 
-两个安装包都在 [v0.1.1](https://github.com/onedearest/xunzhan/releases/tag/v0.1.1)：
+两个安装包都在 [v0.1.2](https://github.com/onedearest/xunzhan/releases/tag/v0.1.2)：
 
-- 安卓：[xunzhan.apk](https://github.com/onedearest/xunzhan/releases/download/v0.1.1/xunzhan.apk)，约 51MB。发到手机上点开安装。
-- Windows：[Xunzhan-0.1.1-win.zip](https://github.com/onedearest/xunzhan/releases/download/v0.1.1/Xunzhan-0.1.1-win.zip)。解压后双击 `xunzhan.exe`。如果系统提示无法验证发布者，选「仍要运行」。
+- 安卓：[xunzhan.apk](https://github.com/onedearest/xunzhan/releases/download/v0.1.2/xunzhan.apk)，约 51MB。发到手机上点开安装。
+- Windows：[Xunzhan-0.1.2-win.zip](https://github.com/onedearest/xunzhan/releases/download/v0.1.2/Xunzhan-0.1.2-win.zip)。解压后双击 `xunzhan.exe`。如果系统提示无法验证发布者，选「仍要运行」。
 
 打开后默认是「聊天」：私聊、群和频道按会话列出，点开可以看最近的消息，能发的会话可以单独回复。群发仍然只发已经加入、并且允许发言的群，私聊不进群发。
 
@@ -30,7 +30,7 @@ npm run desktop
 
 ## Windows
 
-安装包是上面的 `Xunzhan-0.1.1-win.zip`。登录方式和安卓版一样，用手机号收验证码，不用申请 API。关掉窗口，里面的服务会一起停。登录会话写在系统的用户配置目录里。
+安装包是上面的 `Xunzhan-0.1.2-win.zip`。登录方式和安卓版一样，可以用手机号、扫码或机器人令牌，不用申请 API。关掉窗口，里面的服务会一起停。登录会话写在系统的用户配置目录里。
 
 自己在 Windows 上重新打包：
 
@@ -61,7 +61,11 @@ npm run android
 
 ## 登录真实账号
 
-打开讯栈，点「登录账号」。手机号要带国家码，例如 `+8613800138000`。填入 Telegram 发来的验证码。如果账号开了两步验证，再填一次密码。不需要先去 my.telegram.org 申请 API。
+打开讯栈，点「登录账号」。三种方式都可以，不需要先去 my.telegram.org 申请 API。
+
+- 手机号要带国家码，例如 `+8613800138000`。填入 Telegram 发来的验证码。账号开了两步验证，再填一次密码。
+- 扫码：用已经登录的官方 Telegram，打开「设置 → 设备 → 连接桌面设备」，扫描讯栈里的二维码。开了两步验证时，再填一次密码。
+- 机器人：把 @BotFather 发来的令牌贴进去，格式类似 `123456789:ABC…`。
 
 自己已经有 `api_id` 和 `api_hash` 时，可以在「登录设置」里换上。也可以用环境变量：
 

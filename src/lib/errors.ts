@@ -17,6 +17,10 @@ const known: Record<string, string> = {
   AUTH_KEY_UNREGISTERED: "登录已失效，请重新登录",
   SESSION_REVOKED: "登录已失效，请重新登录",
   FROZEN_METHOD_INVALID: "这个账号已被 Telegram 冻结，暂时不能发消息",
+  ACCESS_TOKEN_INVALID: "机器人令牌不正确，请核对 @BotFather 发来的整段",
+  ACCESS_TOKEN_EXPIRED: "机器人令牌已失效，请到 @BotFather 重新生成",
+  AUTH_TOKEN_EXPIRED: "二维码已过期，请重新生成",
+  AUTH_TOKEN_INVALID: "二维码无效，请重新生成",
 };
 
 export function explain(error: unknown): string {
