@@ -37,6 +37,22 @@ npm run package
 
 这是打包好的 Linux 程序，自带页面服务，不需要再开 `npm run dev`。登录会话写在系统的用户配置目录里，不写进安装目录。关掉窗口，里面的服务会一起停。
 
+## 安卓
+
+手机版是安装包，工作台跑在手机里面，不连着电脑上的开发服务。登录、轮流发言和频道浏览跟桌面版是同一套。
+
+```bash
+npm run android
+```
+
+安装包在 `android/app/build/outputs/apk/debug/app-debug.apk`。当前这份也放在 `dist/xunzhan.apk`。手机开了调试后：
+
+```bash
+adb install -r dist/xunzhan.apk
+```
+
+装好后打开「讯栈」。页面跑在手机本机的 `127.0.0.1`，不连电脑上的开发服务。会话写在应用自己的数据目录里。退出应用后，还没发完的那一轮会停。
+
 还没有 Telegram 应用凭证时，可以先点「先用演示数据走一遍」，把选群、间隔和停止发送走通。演示数据不会连接 Telegram。
 
 ## 登录真实账号

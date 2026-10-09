@@ -22,6 +22,14 @@
 /build
 /dist
 /release
+/android/app/libnode/
+/android/app/src/main/assets/nodejs-project/
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/.cxx/
+/android/app/.cxx/
 
 # misc
 .DS_Store
