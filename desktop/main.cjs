@@ -3,9 +3,13 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 
-const port = 43127;
+const packaged = app.isPackaged;
+if (packaged) app.setName("Xunzhan");
+const port = packaged ? 43721 : 43127;
 const origin = `http://127.0.0.1:${port}`;
-const root = path.join(__dirname, "..");
+const root = packaged
+  ? path.join(process.resourcesPath, "payload", "app")
+  : path.join(__dirname, "..");
 
 let serverProcess = null;
 let windowRef = null;
@@ -40,20 +44,24 @@ async function waitForServer() {
 }
 
 function startServer() {
-  const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next");
-  serverProcess = spawn(
-    process.execPath,
-    [nextBin, "dev", "--hostname", "127.0.0.1", "--port", String(port)],
-    {
-      cwd: root,
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: "1",
-        BROWSER: "none",
-      },
-      stdio: "inherit",
+  const command = packaged
+    ? [path.join(root, "server.js")]
+    : [path.join(root, "node_modules", "next", "dist", "bin", "next"), "dev", "--hostname", "127.0.0.1", "--port", String(port)];
+  serverProcess = spawn(process.execPath, command, {
+    cwd: root,
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      BROWSER: "none",
+      NODE_ENV: packaged ? "production" : process.env.NODE_ENV,
+      HOSTNAME: "127.0.0.1",
+      PORT: String(port),
+      XUNZHAN_DATA: packaged
+        ? path.join(app.getPath("userData"), "data")
+        : process.env.XUNZHAN_DATA || path.join(root, "data"),
     },
-  );
+    stdio: "inherit",
+  });
   serverProcess.on("exit", (code) => {
     if (code && code !== 0 && windowRef && !windowRef.isDestroyed()) {
       windowRef.webContents.executeJavaScript(

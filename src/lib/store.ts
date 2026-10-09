@@ -2,7 +2,9 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Job } from "./types";
 
-const directory = path.join(process.cwd(), "data");
+const directory = process.env.XUNZHAN_DATA
+  ? path.resolve(process.env.XUNZHAN_DATA)
+  : path.join(process.cwd(), "data");
 
 export type StoredAccount = {
   id: string;

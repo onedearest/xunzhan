@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 43127",
     "desktop": "electron . --no-sandbox --disable-gpu --disable-dev-shm-usage",
+    "package": "XUNZHAN_DIST=.next-release next build && XUNZHAN_DIST=.next-release node scripts/stage-standalone.mjs && electron-builder --linux dir",
     "lint": "eslint",
     "test": "tsx --test src/lib/policy.test.ts"
   },
@@ -31,10 +32,38 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "electron": "^44.7.0",
+    "electron-builder": "^26.0.12",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "local.xunzhan.desk",
+    "productName": "Xunzhan",
+    "executableName": "xunzhan",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "beforeBuild": "scripts/skip-deps.cjs",
+    "extraResources": [
+      {
+        "from": "release/payload",
+        "to": "payload"
+      }
+    ],
+    "asar": true,
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "category": "Network"
+    }
   }
 }
