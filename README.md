@@ -45,13 +45,15 @@ npm run package
 npm run android
 ```
 
-安装包在 `android/app/build/outputs/apk/debug/app-debug.apk`。当前这份也放在 `dist/xunzhan.apk`。手机开了调试后：
+给测试用的安装包在仓库里的 `apk/xunzhan.apk`。下载后发到手机上，点开安装。页面跑在手机本机，不连电脑上的开发服务。会话写在应用自己的数据目录里。退出应用后，还没发完的那一轮会停。
+
+自己重新打包：
 
 ```bash
-adb install -r dist/xunzhan.apk
+npm run android
 ```
 
-装好后打开「讯栈」。页面跑在手机本机的 `127.0.0.1`，不连电脑上的开发服务。会话写在应用自己的数据目录里。退出应用后，还没发完的那一轮会停。
+安装包会生成在 `android/app/build/outputs/apk/debug/app-debug.apk`。这份只包含手机用的 64 位版本。
 
 还没有 Telegram 应用凭证时，可以先点「先用演示数据走一遍」，把选群、间隔和停止发送走通。演示数据不会连接 Telegram。
 
