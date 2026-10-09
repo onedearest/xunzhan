@@ -58,6 +58,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const touched = useRef(false);
   const queryRef = useRef(query);
@@ -131,10 +132,13 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
       setChannelId(data.status.channelId ?? "");
       setShareLinks(data.status.shareLinks);
       setPage(1);
+      setFormError(null);
       setView(await load(queryRef.current, 1));
       toast.success(data.status.botUsername ? `已接上 @${data.status.botUsername}` : "已开始接收");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "没有接上");
+      const message = error instanceof Error ? error.message : "没有接上";
+      setFormError(message);
+      toast.error(message);
     } finally {
       setBusy(null);
     }
@@ -298,6 +302,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
             />
             <span>允许把编号链接发给别人取回。关掉之后，只有保存的那个人能取。</span>
           </label>
+          {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
           <div className="flex flex-wrap gap-2">
             <Button type="submit" className="h-10" disabled={busy !== null || (!connected && !token.trim())}>
               {busy === "save" ? <Loader2 className="animate-spin" /> : null}
