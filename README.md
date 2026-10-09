@@ -23,19 +23,20 @@ npm run desktop
 
 ## 桌面软件
 
-开发窗口依赖源码目录。要拿出能单独运行的程序：
+Windows 安装包在 [GitHub Releases](https://github.com/onedearest/xunzhan/releases) 里，文件名是 `Xunzhan-0.1.0-win.zip`。解压后双击 `xunzhan.exe`。Windows 如果提示无法验证发布者，选「仍要运行」。登录方式和手机版一样，用手机号收验证码，不用申请 API。关掉窗口，里面的服务会一起停。登录会话写在系统的用户配置目录里。
+
+自己在 Windows 上重新打包：
+
+```bash
+npm run package:win
+```
+
+Linux 上重新打包：
 
 ```bash
 npm run package
-```
-
-完成后运行：
-
-```bash
 ./dist/linux-unpacked/xunzhan
 ```
-
-这是打包好的 Linux 程序，自带页面服务，不需要再开 `npm run dev`。登录会话写在系统的用户配置目录里，不写进安装目录。关掉窗口，里面的服务会一起停。
 
 ## 安卓
 

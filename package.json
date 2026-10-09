@@ -9,6 +9,7 @@
     "start": "next start --hostname 0.0.0.0 --port 43127",
     "desktop": "electron . --no-sandbox --disable-gpu --disable-dev-shm-usage",
     "package": "XUNZHAN_DIST=.next-release next build && XUNZHAN_DIST=.next-release node scripts/stage-standalone.mjs && electron-builder --linux dir",
+    "package:win": "XUNZHAN_DIST=.next-release next build && XUNZHAN_DIST=.next-release node scripts/stage-standalone.mjs && electron-builder --win zip --x64",
     "phone": "vite --config phone/vite.config.ts --host 127.0.0.1 --port 43129",
     "android": "node scripts/setup-android.mjs && node scripts/stage-android.mjs && cd android && ./gradlew assembleDebug",
     "lint": "eslint",
@@ -72,6 +73,13 @@
         "dir"
       ],
       "category": "Network"
+    },
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "executableName": "xunzhan",
+      "signAndEditExecutable": false
     }
   }
 }
