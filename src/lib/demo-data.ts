@@ -120,7 +120,39 @@ export function demoChats(accountId: string): ChatPublic[] {
   return chats[accountId] ?? [];
 }
 
+const extraPosts = new Map<string, PostPublic[]>();
+
+export function rememberDemoPost(accountId: string, chatId: string, text: string) {
+  const key = `${accountId}:${chatId}`;
+  const next = extraPosts.get(key) ?? [];
+  next.unshift({
+    id: `${chatId}-sent-${next.length + 1}`,
+    text,
+    date: new Date().toISOString(),
+    out: true,
+  });
+  extraPosts.set(key, next);
+}
+
 const posts: Record<string, string[]> = {
+  "demo-lin-weekly": [
+    "周衡：这周的接口评审改到周四下午。",
+    "林夏：我先把纪要发在这里，大家照着对。",
+    "陈舟：登录不要再让用户填 API 了，扫码就行。",
+    "林夏：发出去之后，这个群里的旧消息也要还在。",
+  ],
+  "demo-lin-design": [
+    "间距再松一档，列表和会话分成两栏。",
+    "右边要一直是这个群的消息，不要发完就换成别的页面。",
+  ],
+  "demo-lin-feedback": [
+    "有人反馈：电脑版打开还在要 API。",
+    "另一条：消息发出去就看不见群里刚才说了什么。",
+  ],
+  "demo-zhou-reading": [
+    "这周读的是本地客户端怎么留住会话。",
+    "读完把笔记发在群里，过一会儿还能翻到。",
+  ],
   "demo-lin-chen": [
     "下午的产品周会，我先发纪要。",
     "好，我在设计批评小组等你那条。",
@@ -161,13 +193,14 @@ export function demoPosts(accountId: string, chatId: string): PostPublic[] {
   if (!isDemoAccount(accountId)) return [];
   const lines = posts[chatId] ?? [];
   const now = Date.now();
-  return lines.map((text, index) => ({
+  const history = lines.map((text, index) => ({
     id: `${chatId}-${index + 1}`,
     text,
-    date: new Date(now - index * 3_600_000).toISOString(),
+    date: new Date(now - (index + 1) * 3_600_000).toISOString(),
     views: 86 + index * 13,
     out: index % 2 === 1,
   }));
+  return [...(extraPosts.get(`${accountId}:${chatId}`) ?? []), ...history];
 }
 
 export function demoFails(accountId: string, chatId: string): string | null {
