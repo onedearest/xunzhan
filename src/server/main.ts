@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { DELETE as deleteAccount } from "../app/api/accounts/[id]/route";
 import { GET as listChatsRoute } from "../app/api/accounts/[id]/chats/route";
+import { GET as listMessagesRoute, POST as sendMessageRoute } from "../app/api/accounts/[id]/messages/route";
 import { GET as listPostsRoute } from "../app/api/accounts/[id]/posts/route";
 import { POST as cancelLogin } from "../app/api/auth/cancel/route";
 import { POST as submitCode } from "../app/api/auth/code/route";
@@ -51,6 +52,9 @@ async function dispatch(request: Request): Promise<Response | null> {
   if (pathname === "/api/jobs" && method === "GET") return listJobsRoute();
   if (pathname === "/api/jobs" && method === "POST") return createJobRoute(request);
 
+  const messages = pathname.match(/^\/api\/accounts\/([^/]+)\/messages$/);
+  if (messages && method === "GET") return listMessagesRoute(request, params(messages[1]));
+  if (messages && method === "POST") return sendMessageRoute(request, params(messages[1]));
   const posts = pathname.match(/^\/api\/accounts\/([^/]+)\/posts$/);
   if (posts && method === "GET") return listPostsRoute(request, params(posts[1]));
   const chats = pathname.match(/^\/api\/accounts\/([^/]+)\/chats$/);

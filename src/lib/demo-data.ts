@@ -56,6 +56,19 @@ const chats: Record<string, ChatPublic[]> = {
       canPost: false,
       reason: "频道需要发帖权限",
     },
+    {
+      id: "demo-lin-saved",
+      title: "收藏夹",
+      kind: "private",
+      canPost: true,
+    },
+    {
+      id: "demo-lin-chen",
+      title: "陈舟",
+      kind: "private",
+      username: "chenzhou",
+      canPost: true,
+    },
   ],
   "demo-zhou": [
     {
@@ -108,6 +121,14 @@ export function demoChats(accountId: string): ChatPublic[] {
 }
 
 const posts: Record<string, string[]> = {
+  "demo-lin-chen": [
+    "下午的产品周会，我先发纪要。",
+    "好，我在设计批评小组等你那条。",
+  ],
+  "demo-lin-saved": [
+    "待办：轮流发言，不要两个账号同时开口。",
+    "收藏夹只给自己看，也可以从这里再发出去。",
+  ],
   "demo-lin-log": [
     "本周版本已经合入设置页。登录态仍只保存在这台电脑的 data 目录。",
     "周会纪要：群发改成轮流。林夏先发一条，周衡再发一条，中间留间隔。",
@@ -145,6 +166,7 @@ export function demoPosts(accountId: string, chatId: string): PostPublic[] {
     text,
     date: new Date(now - index * 3_600_000).toISOString(),
     views: 86 + index * 13,
+    out: index % 2 === 1,
   }));
 }
 

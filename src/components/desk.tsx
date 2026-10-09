@@ -46,7 +46,7 @@ import type {
   SettingsView,
 } from "@/lib/types";
 
-type DeskMode = "send" | "browse";
+type DeskMode = "chat" | "send" | "browse";
 
 type ChatState = {
   status: "loading" | "ready" | "error";
@@ -55,6 +55,7 @@ type ChatState = {
 };
 
 const kindLabel: Record<ChatKind, string> = {
+  private: "私聊",
   group: "群",
   supergroup: "超级群",
   channel: "频道",
@@ -121,8 +122,9 @@ export function Desk() {
   const [intervalSec, setIntervalSec] = useState(LIMITS.minIntervalSec);
   const [scheduledLocal, setScheduledLocal] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  const [mode, setMode] = useState<DeskMode>("send");
+  const [mode, setMode] = useState<DeskMode>("chat");
   const [browseId, setBrowseId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [history, setHistory] = useState<Job[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -240,9 +242,11 @@ export function Desk() {
   const active = accounts.find((account) => account.id === activeId) ?? null;
   const chatState = activeId ? chats[activeId] : undefined;
   const visibleChats = useMemo(() => {
-    const list = (chatState?.chats ?? []).filter((chat) =>
-      mode === "browse" ? chat.kind === "channel" : true,
-    );
+    const list = (chatState?.chats ?? []).filter((chat) => {
+      if (mode === "browse") return chat.kind === "channel";
+      if (mode === "send") return chat.kind !== "private";
+      return true;
+    });
     const needle = query.trim().toLowerCase();
     if (!needle) return list;
     return list.filter((chat) =>
@@ -262,6 +266,10 @@ export function Desk() {
   const browseChat =
     mode === "browse" && activeId
       ? (chatState?.chats.find((chat) => chat.id === browseId && chat.kind === "channel") ?? null)
+      : null;
+  const openChat =
+    mode === "chat" && activeId
+      ? (chatState?.chats.find((chat) => chat.id === openId) ?? null)
       : null;
 
   useEffect(() => {
@@ -408,6 +416,8 @@ export function Desk() {
         setQuery("");
         setNavOpen(false);
         setLeavingId(null);
+        setOpenId(null);
+        setBrowseId(null);
       }}
       onAdd={openAdd}
       onSettings={() => setSettingsOpen(true)}
@@ -488,6 +498,13 @@ export function Desk() {
               <div className="flex shrink-0 rounded-lg border border-border p-0.5">
                 <button
                   type="button"
+                  className={`rounded-md px-2.5 py-1 text-xs ${mode === "chat" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                  onClick={() => setMode("chat")}
+                >
+                  聊天
+                </button>
+                <button
+                  type="button"
                   className={`rounded-md px-2.5 py-1 text-xs ${mode === "send" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
                   onClick={() => setMode("send")}
                 >
@@ -506,9 +523,9 @@ export function Desk() {
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={mode === "browse" ? "搜索频道" : "搜索群名或用户名"}
+                  placeholder={mode === "browse" ? "搜索频道" : mode === "chat" ? "搜索会话" : "搜索群名或用户名"}
                   className="h-9 pl-8"
-                  aria-label={mode === "browse" ? "搜索频道" : "搜索群"}
+                  aria-label={mode === "browse" ? "搜索频道" : mode === "chat" ? "搜索会话" : "搜索群"}
                 />
               </div>
               </div>
@@ -534,17 +551,19 @@ export function Desk() {
                 state={chatState}
                 chats={visibleChats}
                 selected={activeId ? (selected[activeId] ?? []) : []}
-                browsingId={browseChat?.id ?? null}
+                browsingId={mode === "chat" ? (openChat?.id ?? null) : (browseChat?.id ?? null)}
                 job={job}
                 accountId={activeId}
                 onToggle={(chatId) => activeId && toggleChat(activeId, chatId)}
-                onBrowse={setBrowseId}
+                onBrowse={mode === "chat" ? setOpenId : setBrowseId}
                 onRetry={() => activeId && void loadChats(activeId)}
               />
             </div>
           </section>
 
-          {mode === "browse" ? (
+          {mode === "chat" ? (
+            <Thread accountId={activeId} chat={openChat} />
+          ) : mode === "browse" ? (
             <Reader accountId={activeId} chat={browseChat} />
           ) : (
             <Composer
@@ -738,9 +757,11 @@ function ChatList({
     return (
       <div className="grid min-h-64 place-items-center px-6 text-center">
         <div>
-          <p className="font-medium">这个账号还没有群</p>
+          <p className="font-medium">{mode === "chat" ? "这个账号还没有会话" : "这个账号还没有群"}</p>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            这里只列出已经加入的群和频道。私聊不会出现，也不能从这里加群。
+            {mode === "chat"
+              ? "这里列出已经有的私聊、群和频道，按 Telegram 里的顺序排列。"
+              : "群发只列出已经加入的群和频道。私聊请到「聊天」里单独回复。"}
           </p>
         </div>
       </div>
@@ -750,13 +771,13 @@ function ChatList({
     return (
       <div className="grid min-h-64 place-items-center px-6 text-center">
         <p className="text-sm text-muted-foreground">
-          {mode === "browse" ? "没有可浏览的频道" : "没有匹配的群"}
+          {mode === "browse" ? "没有可浏览的频道" : mode === "chat" ? "没有匹配的会话" : "没有匹配的群"}
         </p>
       </div>
     );
   }
 
-  if (mode === "browse") {
+  if (mode === "browse" || mode === "chat") {
     return (
       <ul className="space-y-1">
         {chats.map((chat) => {
@@ -775,12 +796,16 @@ function ChatList({
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="truncate font-medium">{chat.title}</span>
-                    <Badge variant="outline">频道</Badge>
+                    <Badge variant="outline">{kindLabel[chat.kind]}</Badge>
                     {!chat.canPost && !closed ? <Badge variant="secondary">只读</Badge> : null}
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
                     {chat.username ? `@${chat.username} · ` : ""}
-                    {closed ? chat.reason : "打开后在右侧上下滚动，不会增加阅读数"}
+                    {closed
+                      ? chat.reason
+                      : mode === "chat"
+                        ? "打开后可以看最近的消息"
+                        : "打开后在右侧上下滚动，不会增加阅读数"}
                   </span>
                 </span>
               </button>
@@ -841,6 +866,164 @@ function DeliveryBadge({ status }: { status: Job["deliveries"][number]["status"]
   if (status === "sending") return <Badge variant="secondary">发送中</Badge>;
   if (status === "skipped") return <Badge variant="outline">已跳过</Badge>;
   return <Badge variant="outline">排队</Badge>;
+}
+
+function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPublic | null }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const requestId = useRef(0);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const chatKey = accountId && chat ? `${accountId}:${chat.id}:${reloadToken}` : "";
+  const [session, setSession] = useState<{
+    key: string;
+    posts: PostPublic[];
+    status: "idle" | "loading" | "ready" | "error";
+    error: string | null;
+  }>({ key: "", posts: [], status: "idle", error: null });
+  let view = session;
+  if (session.key !== chatKey) {
+    view = { key: chatKey, posts: [], status: chatKey ? "loading" : "idle", error: null };
+    setSession(view);
+  }
+
+  useEffect(() => {
+    setDraft("");
+    if (!chatKey || !accountId || !chat) return;
+    const current = ++requestId.current;
+    let cancelled = false;
+    void api<{ posts: PostPublic[] }>(
+      `/api/accounts/${encodeURIComponent(accountId)}/messages?chatId=${encodeURIComponent(chat.id)}`,
+    )
+      .then((data) => {
+        if (cancelled || current !== requestId.current) return;
+        setSession((currentSession) =>
+          currentSession.key === chatKey
+            ? { ...currentSession, posts: data.posts, status: "ready", error: null }
+            : currentSession,
+        );
+      })
+      .catch((reason: unknown) => {
+        if (cancelled || current !== requestId.current) return;
+        setSession((currentSession) =>
+          currentSession.key === chatKey
+            ? {
+                ...currentSession,
+                posts: [],
+                status: "error",
+                error: reason instanceof Error ? reason.message : "消息没有加载出来",
+              }
+            : currentSession,
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, chat, chatKey]);
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && view.status === "ready") el.scrollTop = el.scrollHeight;
+  }, [view.status, view.posts, chatKey]);
+
+  const posts = [...view.posts].reverse();
+
+  async function send() {
+    if (!accountId || !chat || !draft.trim() || sending) return;
+    setSending(true);
+    try {
+      await api(`/api/accounts/${encodeURIComponent(accountId)}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ chatId: chat.id, message: draft }),
+      });
+      const sent: PostPublic = {
+        id: `local-${Date.now()}`,
+        text: draft.trim(),
+        date: new Date().toISOString(),
+        out: true,
+      };
+      setSession((currentSession) =>
+        currentSession.key === chatKey
+          ? { ...currentSession, posts: [sent, ...currentSession.posts] }
+          : currentSession,
+      );
+      setDraft("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "没有发出去");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <aside className="flex max-h-[52dvh] min-h-0 flex-col border-t border-border bg-card lg:max-h-none lg:border-t-0">
+      <div className="border-b border-border px-4 py-3 lg:px-5">
+        <p className="truncate text-base font-medium">{chat ? chat.title : "会话"}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {chat
+            ? `${kindLabel[chat.kind]}${chat.username ? ` · @${chat.username}` : ""}${chat.canPost ? "" : ` · ${chat.reason ?? "不能发送"}`}`
+            : "从左边点开一个已经有的会话。"}
+        </p>
+      </div>
+      <div ref={scroller} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3 lg:px-5">
+        {!chat ? (
+          <div className="grid min-h-48 place-items-center text-center">
+            <p className="text-sm text-muted-foreground">私聊、群和频道都会出现在左边。</p>
+          </div>
+        ) : view.status === "loading" ? (
+          <div className="space-y-2" aria-busy="true">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="h-12 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        ) : view.status === "error" ? (
+          <div className="grid min-h-48 place-items-center text-center">
+            <div>
+              <p className="text-sm">{view.error}</p>
+              <Button className="mt-4" variant="outline" onClick={() => setReloadToken((value) => value + 1)}>
+                重试
+              </Button>
+            </div>
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="grid min-h-48 place-items-center text-center">
+            <p className="text-sm text-muted-foreground">这里还没有文字消息。</p>
+          </div>
+        ) : (
+          posts.map((post) => (
+            <div key={post.id} className={`flex ${post.out ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm leading-6 whitespace-pre-wrap ${
+                  post.out ? "bg-primary text-primary-foreground" : "bg-muted"
+                }`}
+              >
+                {post.text}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <form
+        className="flex items-end gap-2 border-t border-border p-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void send();
+        }}
+      >
+        <Textarea
+          value={draft}
+          disabled={!chat?.canPost || sending}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={chat?.canPost ? "写一条消息" : "这里不能发送"}
+          className="min-h-10 flex-1 resize-none"
+          maxLength={LIMITS.maxMessageLength}
+        />
+        <Button type="submit" className="h-10" disabled={!chat?.canPost || sending || !draft.trim()}>
+          {sending ? <Loader2 className="animate-spin" /> : <Send />}
+        </Button>
+      </form>
+    </aside>
+  );
 }
 
 function Reader({ accountId, chat }: { accountId: string | null; chat: ChatPublic | null }) {
@@ -1247,7 +1430,7 @@ function Onboarding({
         <div>
           <h1 className="text-2xl font-medium">讯栈</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            用手机号登录 Telegram，最多 {LIMITS.maxAccounts} 个账号。勾选已经加入的群，账号会轮流发言。不会自动加群，也不会给私聊发消息。
+            用手机号登录 Telegram，最多 {LIMITS.maxAccounts} 个账号。可以打开已有会话单独回复，也可以在群发里轮流发到已经加入的群。不会自动加群。
           </p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">

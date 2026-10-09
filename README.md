@@ -2,10 +2,12 @@
 
 讯栈有两个版本：安卓和 Windows。两边是同一套工作台，可以登录最多 50 个账号，把同一条消息轮流发到这些账号已经加入的群和频道，也可以在本窗口里上下浏览已经加入的频道。
 
-两个安装包都在 [v0.1.0](https://github.com/onedearest/xunzhan/releases/tag/v0.1.0)：
+两个安装包都在 [v0.1.1](https://github.com/onedearest/xunzhan/releases/tag/v0.1.1)：
 
-- 安卓：[xunzhan.apk](https://github.com/onedearest/xunzhan/releases/download/v0.1.0/xunzhan.apk)，约 51MB。发到手机上点开安装。
-- Windows：[Xunzhan-0.1.0-win.zip](https://github.com/onedearest/xunzhan/releases/download/v0.1.0/Xunzhan-0.1.0-win.zip)。解压后双击 `xunzhan.exe`。如果系统提示无法验证发布者，选「仍要运行」。
+- 安卓：[xunzhan.apk](https://github.com/onedearest/xunzhan/releases/download/v0.1.1/xunzhan.apk)，约 51MB。发到手机上点开安装。
+- Windows：[Xunzhan-0.1.1-win.zip](https://github.com/onedearest/xunzhan/releases/download/v0.1.1/Xunzhan-0.1.1-win.zip)。解压后双击 `xunzhan.exe`。如果系统提示无法验证发布者，选「仍要运行」。
+
+打开后默认是「聊天」：私聊、群和频道按会话列出，点开可以看最近的消息，能发的会话可以单独回复。群发仍然只发已经加入、并且允许发言的群，私聊不进群发。
 
 它不会自动加群，也不会给私聊发消息。账号按顺序轮流发言，每条消息之间至少间隔 8 秒。每个账号单次最多 20 个群，一整轮最多 60 个群。这是为了把群发留在你自己负责的群里。
 
@@ -28,7 +30,7 @@ npm run desktop
 
 ## Windows
 
-安装包是上面的 `Xunzhan-0.1.0-win.zip`。登录方式和安卓版一样，用手机号收验证码，不用申请 API。关掉窗口，里面的服务会一起停。登录会话写在系统的用户配置目录里。
+安装包是上面的 `Xunzhan-0.1.1-win.zip`。登录方式和安卓版一样，用手机号收验证码，不用申请 API。关掉窗口，里面的服务会一起停。登录会话写在系统的用户配置目录里。
 
 自己在 Windows 上重新打包：
 

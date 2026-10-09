@@ -1,4 +1,4 @@
-export type ChatKind = "group" | "supergroup" | "channel";
+export type ChatKind = "private" | "group" | "supergroup" | "channel";
 
 export type ChatPublic = {
   id: string;
@@ -49,6 +49,7 @@ export type PostPublic = {
   text: string;
   date: string;
   views?: number;
+  out?: boolean;
 };
 
 export type SettingsView = {

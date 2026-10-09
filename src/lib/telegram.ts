@@ -71,6 +71,19 @@ function toRaw(dialog: {
   if (!dialog.id || !dialog.entity || typeof dialog.entity !== "object") return null;
   const entity = dialog.entity as Record<string, unknown>;
   const className = String(entity.className ?? "");
+  if (className === "User") {
+    return {
+      className: "User",
+      id: dialog.id.toString(),
+      title: typeof dialog.title === "string" ? dialog.title : undefined,
+      firstName: typeof entity.firstName === "string" ? entity.firstName : undefined,
+      lastName: typeof entity.lastName === "string" ? entity.lastName : undefined,
+      username: typeof entity.username === "string" ? entity.username : undefined,
+      self: Boolean(entity.self),
+      deleted: Boolean(entity.deleted),
+      bot: Boolean(entity.bot),
+    };
+  }
   if (!["Chat", "Channel", "ChatForbidden", "ChannelForbidden"].includes(className)) return null;
   const admin = entity.adminRights as { postMessages?: boolean } | undefined;
   const banned = entity.bannedRights as { sendMessages?: boolean } | undefined;
@@ -339,9 +352,6 @@ export async function listChats(accountId: string): Promise<ChatPublic[]> {
     chats.push(chat);
     if (dialog.inputEntity) peers.set(chat.id, dialog.inputEntity);
   }
-  chats.sort(
-    (a, b) => Number(b.canPost) - Number(a.canPost) || a.title.localeCompare(b.title, "zh"),
-  );
   live().peers.set(accountId, peers);
   return chats;
 }
@@ -378,10 +388,72 @@ export async function listPosts(
         date: message.date,
         views: message.views,
         mediaClass: message.media?.className,
+        out: Boolean((message as { out?: boolean }).out),
       }),
     )
     .filter((post): post is PostPublic => post !== null);
   return { chat, posts };
+}
+
+export async function listThread(
+  accountId: string,
+  chatId: string,
+): Promise<{ chat: ChatPublic; posts: PostPublic[] }> {
+  const chats = await listChats(accountId);
+  const chat = chats.find((item) => item.id === chatId);
+  if (!chat) throw new Error("找不到这个会话，请刷新列表");
+  if (chat.reason?.includes("退出") || chat.reason?.includes("无权")) {
+    throw new Error("这个会话已经退出，不能打开");
+  }
+  if (isDemoAccount(accountId)) {
+    return { chat, posts: demoPosts(accountId, chatId) };
+  }
+  if (chat.kind === "channel") return listPosts(accountId, chatId);
+  const peer = live().peers.get(accountId)?.get(chatId);
+  if (!peer) throw new Error("找不到这个会话，请刷新列表");
+  const client = await connectAccount(accountId);
+  let messages: {
+    className?: string;
+    id?: number;
+    message?: string;
+    date?: number;
+    views?: number;
+    out?: boolean;
+    media?: { className?: string } | null;
+  }[];
+  try {
+    messages = await client.getMessages(peer, { limit: 40 });
+  } catch (error) {
+    throw new Error(explain(error));
+  }
+  const posts = messages
+    .map((message) =>
+      readablePost({
+        className: message.className,
+        id: message.id,
+        message: message.message,
+        date: message.date,
+        views: message.views,
+        mediaClass: message.media?.className,
+        out: Boolean(message.out),
+      }),
+    )
+    .filter((post): post is PostPublic => post !== null);
+  return { chat, posts };
+}
+
+export async function replyTo(accountId: string, chatId: string, message: string) {
+  const text = message.trim();
+  if (!text) throw new Error("先写一点内容");
+  if (text.length > LIMITS.maxMessageLength) {
+    throw new Error(`一条消息最长 ${LIMITS.maxMessageLength} 个字`);
+  }
+  const chats = await listChats(accountId);
+  const chat = chats.find((item) => item.id === chatId);
+  if (!chat) throw new Error("找不到这个会话，请刷新列表");
+  if (!chat.canPost) throw new Error(chat.reason || "这里不能发消息");
+  await sendTo(accountId, chatId, text);
+  return chat;
 }
 
 export async function sendTo(accountId: string, chatId: string, message: string) {

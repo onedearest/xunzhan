@@ -72,6 +72,25 @@ test("classifies supergroups and basic groups", () => {
   assert.equal(group.canPost, true);
 });
 
+test("classifies private chats and saved messages", () => {
+  const person = classifyChat({
+    className: "User",
+    id: "9",
+    firstName: "陈",
+    lastName: "舟",
+    username: "chenzhou",
+  });
+  assert.equal(person.kind, "private");
+  assert.equal(person.title, "陈 舟");
+  assert.equal(person.canPost, true);
+
+  const saved = classifyChat({ className: "User", id: "10", self: true, firstName: "林夏" });
+  assert.equal(saved.title, "收藏夹");
+
+  const gone = classifyChat({ className: "User", id: "11", deleted: true, firstName: "旧账号" });
+  assert.equal(gone.canPost, false);
+});
+
 test("treats left and forbidden chats as unsendable", () => {
   const left = classifyChat({ className: "Chat", id: "5", title: "旧群", left: true });
   assert.equal(left.canPost, false);

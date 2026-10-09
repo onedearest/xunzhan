@@ -12,11 +12,16 @@ export const LIMITS = {
 };
 
 export type RawChat = {
-  className: "Chat" | "Channel" | "ChatForbidden" | "ChannelForbidden";
+  className: "Chat" | "Channel" | "ChatForbidden" | "ChannelForbidden" | "User";
   id: string;
   title?: string;
   left?: boolean;
   deactivated?: boolean;
+  self?: boolean;
+  deleted?: boolean;
+  bot?: boolean;
+  firstName?: string;
+  lastName?: string;
   broadcast?: boolean;
   megagroup?: boolean;
   gigagroup?: boolean;
@@ -54,6 +59,21 @@ export function classifyChat(raw: RawChat): ChatPublic {
     };
   }
 
+  if (raw.className === "User") {
+    const name =
+      [raw.firstName, raw.lastName].filter(Boolean).join(" ") ||
+      raw.username ||
+      raw.title ||
+      "未命名";
+    return {
+      ...base,
+      title: raw.self ? "收藏夹" : name,
+      kind: "private",
+      canPost: !raw.deleted,
+      reason: raw.deleted ? "这个账号已注销" : undefined,
+    };
+  }
+
   if (raw.className === "Chat") {
     const blocked = !!raw.defaultBannedSend && !raw.creator && !raw.adminAny;
     return {
@@ -86,6 +106,7 @@ export function classifyChat(raw: RawChat): ChatPublic {
 }
 
 function kindOf(raw: RawChat): ChatKind {
+  if (raw.className === "User") return "private";
   if (raw.className === "Chat" || raw.className === "ChatForbidden") return "group";
   if (raw.broadcast && !raw.megagroup) return "channel";
   return "supergroup";
@@ -172,6 +193,9 @@ export function planBatch(input: {
     for (const chatId of selection.chatIds) {
       const chat = catalog.find((item) => item.id === chatId);
       if (!chat) return { ok: false, error: "有选中的群不在列表里，请刷新后再发" };
+      if (chat.kind === "private") {
+        return { ok: false, error: `私聊请在会话里单独回复：「${chat.title}」` };
+      }
       if (!chat.canPost) {
         return {
           ok: false,
@@ -311,6 +335,7 @@ export function readablePost(input: {
   date?: number;
   views?: number;
   mediaClass?: string;
+  out?: boolean;
 }): PostPublic | null {
   if (input.className !== "Message") return null;
   const text = typeof input.message === "string" ? input.message.trim() : "";
@@ -323,6 +348,7 @@ export function readablePost(input: {
     text: body,
     date: new Date(seconds * 1000).toISOString(),
     ...(typeof input.views === "number" ? { views: input.views } : {}),
+    ...(input.out ? { out: true } : {}),
   };
 }
 
