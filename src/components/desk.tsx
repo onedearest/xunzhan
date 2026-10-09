@@ -13,6 +13,7 @@ import {
   Square,
 } from "lucide-react";
 import { toast } from "sonner";
+import { VaultPanel } from "@/components/vault-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -133,6 +134,7 @@ export function Desk() {
   const [sending, setSending] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
   const [leavingId, setLeavingId] = useState<string | null>(null);
+  const [vaultOpen, setVaultOpen] = useState(false);
   const previousJob = useRef<string | null>(null);
 
   const applyBootstrap = useCallback((data: Bootstrap) => {
@@ -422,6 +424,11 @@ export function Desk() {
       onAdd={openAdd}
       onSettings={() => setSettingsOpen(true)}
       onDemo={() => void enableDemo(!settings.demo)}
+      vaultOpen={vaultOpen}
+      onVault={() => {
+        setVaultOpen(true);
+        setNavOpen(false);
+      }}
     />
   );
 
@@ -443,12 +450,18 @@ export function Desk() {
         </SheetContent>
       </Sheet>
 
-      {accounts.length === 0 ? (
+      {vaultOpen ? (
+        <VaultPanel onClose={() => setVaultOpen(false)} />
+      ) : accounts.length === 0 ? (
         <Onboarding
           demoBusy={demoBusy}
           onOpenNav={() => setNavOpen(true)}
           onAdd={openAdd}
           onDemo={() => void enableDemo(true)}
+          onVault={() => {
+            setVaultOpen(true);
+            setNavOpen(false);
+          }}
         />
       ) : (
         <div className="grid min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]">
@@ -625,20 +638,24 @@ function AccountRail({
   selected,
   demo,
   demoBusy,
+  vaultOpen,
   onSelect,
   onAdd,
   onSettings,
   onDemo,
+  onVault,
 }: {
   accounts: AccountPublic[];
   activeId: string | null;
   selected: Record<string, string[]>;
   demo: boolean;
   demoBusy: boolean;
+  vaultOpen: boolean;
   onSelect: (id: string) => void;
   onAdd: () => void;
   onSettings: () => void;
   onDemo: () => void;
+  onVault: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -688,6 +705,9 @@ function AccountRail({
         )}
       </div>
       <div className="shrink-0 space-y-2 border-t border-sidebar-border p-3">
+        <Button variant={vaultOpen ? "secondary" : "outline"} className="h-9 w-full" onClick={onVault}>
+          存储机器人
+        </Button>
         <Button className="h-9 w-full" onClick={onAdd}>
           <Plus />
           登录账号
@@ -1415,11 +1435,13 @@ function Onboarding({
   onOpenNav,
   onAdd,
   onDemo,
+  onVault,
 }: {
   demoBusy: boolean;
   onOpenNav: () => void;
   onAdd: () => void;
   onDemo: () => void;
+  onVault: () => void;
 }) {
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
@@ -1445,6 +1467,9 @@ function Onboarding({
           <Button variant="outline" className="mt-2 h-10 w-full" disabled={demoBusy} onClick={onDemo}>
             {demoBusy ? <Loader2 className="animate-spin" /> : null}
             先用演示数据走一遍
+          </Button>
+          <Button variant="ghost" className="mt-2 h-10 w-full" onClick={onVault}>
+            接上存储机器人
           </Button>
         </div>
       </div>
