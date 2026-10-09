@@ -371,11 +371,6 @@ export function Desk() {
   }
 
   function openAdd() {
-    if (!settings.hasHash) {
-      setSettingsOpen(true);
-      toast("先保存 my.telegram.org 的应用凭证");
-      return;
-    }
     setLoginOpen(true);
   }
 
@@ -440,10 +435,8 @@ export function Desk() {
 
       {accounts.length === 0 ? (
         <Onboarding
-          settings={settings}
           demoBusy={demoBusy}
           onOpenNav={() => setNavOpen(true)}
-          onSaved={(next) => setSettings(next)}
           onAdd={openAdd}
           onDemo={() => void enableDemo(true)}
         />
@@ -630,21 +623,16 @@ function AccountRail({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-3 px-4 py-5">
-        <span className="grid size-9 place-items-center rounded-md bg-[#f4efe4] font-heading text-lg text-[#1d4a3d]">
+      <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
+        <span className="grid size-9 place-items-center rounded-md bg-primary text-sm font-medium text-primary-foreground">
           讯
         </span>
-        <div>
-          <p className="font-heading text-xl leading-none text-[#f4efe4]">讯栈</p>
-          <p className="mt-1 text-[11px] tracking-[0.16em] text-[#d9d0c0] uppercase">
-            Dispatch desk
-          </p>
-        </div>
+        <p className="text-base font-medium">讯栈</p>
       </div>
-      <p className="px-4 pb-2 text-xs text-[#b7ad9e]">账号</p>
+      <p className="px-4 pt-3 pb-2 text-xs text-muted-foreground">账号</p>
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2">
         {accounts.length === 0 ? (
-          <p className="px-2 py-6 text-sm text-[#b7ad9e]">还没有登录的账号。</p>
+          <p className="px-2 py-6 text-sm text-muted-foreground">还没有登录的账号。</p>
         ) : (
           accounts.map((account) => {
             const count = selected[account.id]?.length ?? 0;
@@ -655,23 +643,23 @@ function AccountRail({
                 type="button"
                 onClick={() => onSelect(account.id)}
                 className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left ${
-                  current ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-white/5"
+                  current ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent"
                 }`}
               >
-                <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#315e50] text-sm text-[#f4efe4]">
+                <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-sm text-primary">
                   {account.name.slice(0, 1)}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-sm">{account.name}</span>
                     {account.demo ? (
-                      <span className="rounded bg-white/10 px-1 text-[10px]">演示</span>
+                      <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">演示</span>
                     ) : null}
                   </span>
-                  <span className="block truncate text-xs text-[#b7ad9e]">{account.phone}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{account.phone}</span>
                 </span>
                 {count > 0 ? (
-                  <span className="rounded-full bg-[#f4efe4] px-1.5 text-xs text-[#1d4a3d]">
+                  <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
                     {count}
                   </span>
                 ) : null}
@@ -681,24 +669,16 @@ function AccountRail({
         )}
       </div>
       <div className="shrink-0 space-y-2 border-t border-sidebar-border p-3">
-        <Button
-          variant="secondary"
-          className="h-9 w-full bg-[#f4efe4] text-[#1c1915] hover:bg-[#efe6d4]"
-          onClick={onAdd}
-        >
+        <Button className="h-9 w-full" onClick={onAdd}>
           <Plus />
-          添加账号
+          登录账号
+        </Button>
+        <Button variant="ghost" className="w-full" onClick={onSettings}>
+          登录设置
         </Button>
         <Button
           variant="ghost"
-          className="w-full text-sidebar-foreground hover:bg-white/10 hover:text-sidebar-foreground"
-          onClick={onSettings}
-        >
-          应用凭证
-        </Button>
-        <Button
-          variant="ghost"
-          className="w-full text-sidebar-foreground hover:bg-white/10 hover:text-sidebar-foreground"
+          className="w-full"
           disabled={demoBusy}
           onClick={onDemo}
         >
@@ -1245,17 +1225,13 @@ function Composer({
 }
 
 function Onboarding({
-  settings,
   demoBusy,
   onOpenNav,
-  onSaved,
   onAdd,
   onDemo,
 }: {
-  settings: SettingsView;
   demoBusy: boolean;
   onOpenNav: () => void;
-  onSaved: (settings: SettingsView) => void;
   onAdd: () => void;
   onDemo: () => void;
 }) {
@@ -1267,50 +1243,23 @@ function Onboarding({
           <Menu />
         </Button>
       </div>
-      <div className="mx-auto grid max-w-3xl gap-10 px-5 py-8 lg:px-10 lg:py-16">
+      <div className="mx-auto grid max-w-lg gap-6 px-5 py-8 lg:py-16">
         <div>
-          <p className="text-xs tracking-[0.18em] text-primary uppercase">Dispatch desk</p>
-          <h1 className="mt-3 max-w-xl font-heading text-4xl leading-tight text-balance sm:text-5xl">
-            把一条消息，送到你负责的每一个群。
-          </h1>
-          <p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">
-            讯栈可以登录最多 {LIMITS.maxAccounts} 个 Telegram 账号。勾选已经加入的群，账号会轮流发言。它不会自动加群，也不会给陌生人发私信。
+          <h1 className="text-2xl font-medium">讯栈</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            用手机号登录 Telegram，最多 {LIMITS.maxAccounts} 个账号。勾选已经加入的群，账号会轮流发言。不会自动加群，也不会给私聊发消息。
           </p>
         </div>
-        <ol className="grid gap-3 sm:grid-cols-3">
-          {[
-            ["01", "填入应用凭证", "用 my.telegram.org 的 api_id 和 api_hash。"],
-            ["02", "登录多个账号", "手机号、验证码，有两步验证就再填一次密码。"],
-            ["03", "轮流发出", "一个账号发一条，再换下一个。每条之间最短 8 秒。"],
-          ].map(([index, title, copy]) => (
-            <li key={index} className="rounded-xl border border-border bg-card p-4">
-              <p className="font-heading text-lg text-primary">{index}</p>
-              <p className="mt-2 font-medium">{title}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{copy}</p>
-            </li>
-          ))}
-        </ol>
-        <div className="rounded-xl border border-border bg-card p-5">
-          {settings.hasHash ? (
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-medium">应用凭证已保存</p>
-                <p className="mt-1 text-sm text-muted-foreground">api_id {settings.apiId}</p>
-              </div>
-              <Button className="h-10" onClick={onAdd}>
-                <Plus />
-                添加第一个账号
-              </Button>
-            </div>
-          ) : (
-            <CredentialForm settings={settings} onSaved={onSaved} />
-          )}
-          <div className="mt-4 border-t border-border pt-4">
-            <Button variant="outline" disabled={demoBusy} onClick={onDemo}>
-              {demoBusy ? <Loader2 className="animate-spin" /> : null}
-              先用演示数据走一遍
-            </Button>
-          </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="text-sm">登录后填写验证码。账号开了两步验证，再填一次密码。</p>
+          <Button className="mt-4 h-10 w-full" onClick={onAdd}>
+            <Plus />
+            登录账号
+          </Button>
+          <Button variant="outline" className="mt-2 h-10 w-full" disabled={demoBusy} onClick={onDemo}>
+            {demoBusy ? <Loader2 className="animate-spin" /> : null}
+            先用演示数据走一遍
+          </Button>
         </div>
       </div>
     </main>
@@ -1353,18 +1302,9 @@ function CredentialForm({
       }}
     >
       <div>
-        <p className="font-medium">应用凭证</p>
+        <p className="font-medium">自己的凭证（可选）</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          打开{" "}
-          <a
-            className="underline"
-            href="https://my.telegram.org"
-            target="_blank"
-            rel="noreferrer"
-          >
-            my.telegram.org
-          </a>
-          ，在 API development tools 里创建应用。凭证只写在服务器的 data 目录。
+          留空就用内置凭证，直接用手机号登录。只有自己申请到了 api_id 和 api_hash 才需要填写。
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -1414,8 +1354,8 @@ function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>应用凭证</DialogTitle>
-          <DialogDescription>每个第三方客户端都要有自己的 api_id 和 api_hash。</DialogDescription>
+          <DialogTitle>登录设置</DialogTitle>
+          <DialogDescription>手机号登录不需要先申请 API。</DialogDescription>
         </DialogHeader>
         <CredentialForm
           key={`${settings.apiId ?? ""}:${settings.apiHash}`}

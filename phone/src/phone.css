@@ -1,9 +1,3 @@
-:root {
-  --font-outfit: "Outfit", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
-  --font-fraunces: "Fraunces", "Noto Serif CJK SC", "Noto Serif SC", serif;
-  --font-geist-mono: ui-monospace, monospace;
-}
-
 html,
 body,
 #root {

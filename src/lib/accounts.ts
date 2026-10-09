@@ -1,3 +1,4 @@
+import { resolveCredentials } from "./credentials";
 import { demoAccounts } from "./demo-data";
 import { getConfig, listStoredAccounts, saveConfig } from "./store";
 import { logoutAccount } from "./telegram";
@@ -5,12 +6,14 @@ import type { AccountPublic, SettingsView } from "./types";
 
 export async function settingsView(): Promise<SettingsView> {
   const config = await getConfig();
-  const apiHash = config.apiHash || process.env.TELEGRAM_API_HASH || "";
-  const apiId = config.apiId || Number(process.env.TELEGRAM_API_ID) || null;
+  const resolved = await resolveCredentials();
+  const customHash = config.apiHash || process.env.TELEGRAM_API_HASH || "";
+  const fromEnv = Number(process.env.TELEGRAM_API_ID);
+  const customId = config.apiId || (Number.isInteger(fromEnv) && fromEnv > 0 ? fromEnv : null);
   return {
-    apiId,
-    apiHash,
-    hasHash: Boolean(apiId && apiHash),
+    apiId: customId,
+    apiHash: customHash,
+    hasHash: Boolean(resolved.apiId && resolved.apiHash),
     demo: Boolean(config.demo),
   };
 }

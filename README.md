@@ -59,13 +59,9 @@ npm run android
 
 ## 登录真实账号
 
-1. 打开 [my.telegram.org](https://my.telegram.org)，用手机号登录。
-2. 进入 API development tools，创建一个应用，拿到 `api_id` 和 `api_hash`。
-3. 在讯栈的「应用凭证」里保存这两项。
-4. 添加账号。手机号要带国家码，例如 `+8613800138000`。
-5. 填入 Telegram 发来的验证码。如果账号开了两步验证，再填一次密码。
+打开讯栈，点「登录账号」。手机号要带国家码，例如 `+8613800138000`。填入 Telegram 发来的验证码。如果账号开了两步验证，再填一次密码。不需要先去 my.telegram.org 申请 API。
 
-也可以用环境变量，不必写进页面：
+自己已经有 `api_id` 和 `api_hash` 时，可以在「登录设置」里换上。也可以用环境变量：
 
 ```bash
 TELEGRAM_API_ID=123456

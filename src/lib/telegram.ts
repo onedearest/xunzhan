@@ -3,6 +3,7 @@ import { LogLevel } from "teleproto/extensions/Logger";
 import { StringSession } from "teleproto/sessions";
 import { demoChats, demoFails, demoPosts, isDemoAccount } from "./demo-data";
 import { explain } from "./errors";
+import { resolveCredentials } from "./credentials";
 import { classifyChat, LIMITS, normalizePhone, readablePost, type RawChat } from "./policy";
 import {
   deleteStoredAccount,
@@ -59,13 +60,7 @@ function clientOptions() {
 }
 
 async function credentials() {
-  const config = await getConfig();
-  const apiId = config.apiId || Number(process.env.TELEGRAM_API_ID);
-  const apiHash = config.apiHash || process.env.TELEGRAM_API_HASH || "";
-  if (!apiId || !apiHash) {
-    throw new Error("先在设置里填写 my.telegram.org 的 api_id 和 api_hash");
-  }
-  return { apiId, apiHash };
+  return resolveCredentials();
 }
 
 function toRaw(dialog: {
