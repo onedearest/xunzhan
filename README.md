@@ -1,6 +1,11 @@
 # 讯栈
 
-讯栈是一个本地 Telegram 工作台：可以登录最多 50 个账号，把同一条消息轮流发到这些账号已经加入的群和频道，也可以在本窗口里上下浏览已经加入的频道。
+讯栈有两个版本：安卓和 Windows。两边是同一套工作台，可以登录最多 50 个账号，把同一条消息轮流发到这些账号已经加入的群和频道，也可以在本窗口里上下浏览已经加入的频道。
+
+两个安装包都在 [v0.1.0](https://github.com/onedearest/xunzhan/releases/tag/v0.1.0)：
+
+- 安卓：[xunzhan.apk](https://github.com/onedearest/xunzhan/releases/download/v0.1.0/xunzhan.apk)，约 51MB。发到手机上点开安装。
+- Windows：[Xunzhan-0.1.0-win.zip](https://github.com/onedearest/xunzhan/releases/download/v0.1.0/Xunzhan-0.1.0-win.zip)。解压后双击 `xunzhan.exe`。如果系统提示无法验证发布者，选「仍要运行」。
 
 它不会自动加群，也不会给私聊发消息。账号按顺序轮流发言，每条消息之间至少间隔 8 秒。每个账号单次最多 20 个群，一整轮最多 60 个群。这是为了把群发留在你自己负责的群里。
 
@@ -21,9 +26,9 @@ npm run desktop
 
 会打开一个桌面窗口。如果 43127 上已经有开发服务，窗口直接连过去；否则由窗口自己把服务拉起来。登录数据仍在项目里的 `data/` 目录。
 
-## 桌面软件
+## Windows
 
-Windows 安装包在 [GitHub Releases](https://github.com/onedearest/xunzhan/releases) 里，文件名是 `Xunzhan-0.1.0-win.zip`。解压后双击 `xunzhan.exe`。Windows 如果提示无法验证发布者，选「仍要运行」。登录方式和手机版一样，用手机号收验证码，不用申请 API。关掉窗口，里面的服务会一起停。登录会话写在系统的用户配置目录里。
+安装包是上面的 `Xunzhan-0.1.0-win.zip`。登录方式和安卓版一样，用手机号收验证码，不用申请 API。关掉窗口，里面的服务会一起停。登录会话写在系统的用户配置目录里。
 
 自己在 Windows 上重新打包：
 
@@ -40,13 +45,7 @@ npm run package
 
 ## 安卓
 
-手机版是安装包，工作台跑在手机里面，不连着电脑上的开发服务。登录、轮流发言和频道浏览跟桌面版是同一套。
-
-```bash
-npm run android
-```
-
-给测试用的安装包在仓库里的 `apk/xunzhan.apk`。下载后发到手机上，点开安装。页面跑在手机本机，不连电脑上的开发服务。会话写在应用自己的数据目录里。退出应用后，还没发完的那一轮会停。
+安装包是上面的 `xunzhan.apk`。下载后发到手机上，点开安装。工作台跑在手机里面，不连着电脑。会话写在应用自己的数据目录里。退出应用后，还没发完的那一轮会停。
 
 自己重新打包：
 
