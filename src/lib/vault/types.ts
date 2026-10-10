@@ -130,6 +130,7 @@ export type VaultPack = {
   readyAt?: string;
   noticeMessageId?: number;
   noticePage?: number;
+  appendFrom?: number;
 };
 
 export type SeenChannel = {
@@ -139,10 +140,9 @@ export type SeenChannel = {
   seenAt: string;
 };
 
-export type UserPrompt = {
-  ownerId: string;
-  kind: "search";
-};
+export type UserPrompt =
+  | { ownerId: string; kind: "search" }
+  | { ownerId: string; kind: "rename"; code: string };
 
 export type ExpiringNotice = {
   chatId: string;

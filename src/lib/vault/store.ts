@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isVaultCode } from "./format";
 import { emptyVault, type ExpiringNotice, type UserPrompt, type VaultData } from "./types";
 
 export type VaultRepository = {
@@ -86,9 +87,12 @@ function readPrompts(value: unknown): UserPrompt[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
-    const prompt = item as { ownerId?: unknown; kind?: unknown };
+    const prompt = item as { ownerId?: unknown; kind?: unknown; code?: unknown };
     if (prompt.kind === "search" && typeof prompt.ownerId === "string") {
       return [{ ownerId: prompt.ownerId, kind: "search" as const }];
+    }
+    if (prompt.kind === "rename" && typeof prompt.ownerId === "string" && typeof prompt.code === "string" && isVaultCode(prompt.code)) {
+      return [{ ownerId: prompt.ownerId, kind: "rename" as const, code: prompt.code }];
     }
     return [];
   });

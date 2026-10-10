@@ -19,7 +19,7 @@ export type VaultIO = {
   answerCallback(id: string, text?: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
   deliver(chatId: string, pack: VaultPack, currentBotId?: string): Promise<void>;
-  flashBar?(chatId: string, bar: "finish"): Promise<void>;
+  flashBar?(chatId: string, bar: "finish" | "menu"): Promise<void>;
 };
 
 export function randomCode() {
@@ -198,7 +198,6 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
     if (reply.kind === "edit" && reply.messageId) {
       try {
         await io.editMessage(reply.chatId, reply.messageId, reply.text, reply.keyboard);
-        continue;
       } catch {
         await io.deleteMessage(reply.chatId, reply.messageId).catch(() => undefined);
         sent = await sendReply(io, reply);

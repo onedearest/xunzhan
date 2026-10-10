@@ -23,7 +23,7 @@ const steps = [
   "在 Telegram 打开 @BotFather，发送 /newbot，按提示起名，复制它发来的令牌。",
   "把令牌贴到下面，点「开始接收」。讯栈会一直在这台机器上收消息。",
   "打开机器人，点菜单里的「存储」，把文件连续发给它。它们收进同一条消息，超过 10 个会翻页。",
-  "收完点下面的「结束」，再发一个名称。这时才给出编号和链接。查看时 10 个一页，取回时也按 10 个一组发出。",
+  "收完点底部的「确认」，再发一个名称。之后可以追加文件或修改名称。查看时 10 个一页，取回时也按 10 个一组发出。",
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -186,7 +186,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
           <div>
             <h1 className="text-2xl font-medium">存储机器人</h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              贴上 @BotFather 的令牌就能用。文件先收成一组，点结束并写上名称之后，才生成一个编号和一条链接。文件本身留在 Telegram 上。
+              贴上 @BotFather 的令牌就能用。文件先收成一组，点确认并写上名称之后，才生成一个编号和一条链接。之后还能追加文件、修改名称。文件本身留在 Telegram 上。
             </p>
           </div>
           {onClose || homeHref ? (
@@ -353,7 +353,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
             <p className="text-sm text-muted-foreground">正在读取…</p>
           ) : view.items.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              {query ? "没有匹配的文件夹。" : "还没有打包好的文件夹。在 Telegram 里点「存储」，把文件发给机器人，结束并写上名称之后，会出现在这里。"}
+              {query ? "没有匹配的文件夹。" : "还没有打包好的文件夹。在 Telegram 里点「存储」，把文件发给机器人，确认并写上名称之后，会出现在这里。"}
             </p>
           ) : (
             <ul className="divide-y divide-border rounded-lg border border-border bg-card">

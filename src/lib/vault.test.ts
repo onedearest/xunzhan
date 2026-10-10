@@ -133,8 +133,8 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(first.data.packs.length, 1);
   assert.equal(first.data.packs[0]?.status, "collecting");
   assert.equal(first.data.packs[0]?.code, undefined);
-  assert.match(first.decision.replies[0]?.text ?? "", /已收下 1 个/);
-  assert.match(first.decision.replies[0]?.text ?? "", /报告\.pdf/);
+  assert.match(first.decision.replies[0]?.text ?? "", /第1个文件/);
+  assert.match(first.decision.replies[0]?.text ?? "", /确认/);
   assert.equal(first.decision.replies[0]?.bar, undefined);
   assert.equal(first.decision.replies[0]?.armBar, "finish");
   assert.equal(first.decision.replies[0]?.kind, "send");
@@ -149,13 +149,12 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(second.data.packs[0]?.status, "collecting");
   assert.equal(second.decision.replies[0]?.kind, "edit");
   assert.equal(second.decision.replies[0]?.messageId, 77);
-  assert.match(second.decision.replies[0]?.text ?? "", /已收下 2 个/);
-  assert.match(second.decision.replies[0]?.text ?? "", /封面\.png/);
+  assert.match(second.decision.replies[0]?.text ?? "", /第2个文件/);
 
   const talking = step(second.data, textMessage(3, 12, "先别起名"), now, nextCode);
   assert.equal(talking.data.packs[0]?.status, "collecting");
   assert.equal(talking.data.packs[0]?.files.length, 2);
-  assert.match(talking.decision.replies[0]?.text ?? "", /结束/);
+  assert.match(talking.decision.replies[0]?.text ?? "", /确认/);
 
   const asked = step(talking.data, press(4, "e"), now, nextCode);
   assert.equal(asked.data.packs[0]?.status, "naming");
@@ -174,9 +173,10 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(ready[0]?.code, "abcdefgj");
   assert.equal(ready[0]?.name, "周报");
   assert.equal(ready[0]?.files.length, 3);
-  assert.match(named.decision.replies[0]?.text ?? "", /已生成/);
+  assert.match(named.decision.replies[0]?.text ?? "", /请选择文件夹操作/);
+  assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "a:abcdefgj"), true);
   assert.match(named.decision.replies[0]?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
-  assert.equal(named.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "g:abcdefgj");
+  assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "g:abcdefgj"), true);
 });
 
 test("keeps one collecting notice when more files arrive", async () => {
@@ -218,9 +218,9 @@ test("keeps one collecting notice when more files arrive", async () => {
     await applyVaultUpdate(privateFile(2, 11, "b.pdf"), repo, io, { now, nextCode: codes() });
     const saved = await repo.load();
     assert.equal(saved.packs[0]?.noticeMessageId, 10);
-    assert.match(edits[0] ?? "", /已收下 2 个/);
+    assert.match(edits[0] ?? "", /第2个文件/);
     assert.equal(edits.length, 1);
-    assert.match(sent[0] ?? "", /^-:已收下 1 个/);
+    assert.match(sent[0] ?? "", /^-:已接收你发送的第1个文件/);
     assert.equal(sent[1], "finish:·");
     assert.equal(sent.length, 2);
     assert.deepEqual(deleted, [11]);
@@ -254,13 +254,9 @@ test("pages stored files by tens and finishes from the bottom button", () => {
   });
   const added = step(data, privateFile(11, 11, "素材11.pdf"), now, nextCode);
   assert.equal(added.decision.replies[0]?.kind, "edit");
-  assert.match(added.decision.replies[0]?.text ?? "", /第 2\/2 页/);
-  assert.match(added.decision.replies[0]?.text ?? "", /11\. 素材11\.pdf/);
+  assert.match(added.decision.replies[0]?.text ?? "", /第11个文件/);
   assert.doesNotMatch(added.decision.replies[0]?.text ?? "", /素材1\.pdf/);
-  const back = step(added.data, textMessage(12, 12, "上一页"), now, nextCode);
-  assert.match(back.decision.replies[0]?.text ?? "", /1\. 素材1\.pdf/);
-  assert.doesNotMatch(back.decision.replies[0]?.text ?? "", /素材11\.pdf/);
-  const ended = step(added.data, textMessage(13, 13, "结束"), now, nextCode);
+  const ended = step(added.data, textMessage(13, 13, "✅确认"), now, nextCode);
   assert.equal(ended.data.packs[0]?.status, "naming");
   assert.equal(ended.decision.replies[0]?.menu, true);
   assert.match(ended.decision.replies[0]?.text ?? "", /把名称发过来/);
@@ -413,7 +409,7 @@ test("menu offers start, store, packed folders, and keyword search", () => {
   assert.match(started.decision.replies[0]?.text ?? "", /查看文件夹（打包好的）/);
 
   const stored = step(baseData(), textMessage(2, 2, "存储"), now, nextCode);
-  assert.match(stored.decision.replies[0]?.text ?? "", /结束/);
+  assert.match(stored.decision.replies[0]?.text ?? "", /确认/);
   assert.equal(stored.data.packs.length, 0);
 
   const collecting = step(baseData(), privateFile(3, 3), now, nextCode);
@@ -475,6 +471,33 @@ test("a menu button does not become the folder name", () => {
   assert.match(folders.decision.replies[0]?.text ?? "", /还没有打包好的文件夹/);
 });
 
+test("appends files to a folder and renames it", () => {
+  const nextCode = codes();
+  const now = "2026-10-09T00:00:00.000Z";
+  const named = finishPack(step(baseData(), privateFile(1, 10, "报告.pdf"), now, nextCode).data, "周报", now, nextCode, 6);
+  const adding = step(named.data, press(7, "a:abcdefgj"), now, nextCode);
+  assert.equal(adding.data.packs[0]?.status, "collecting");
+  assert.equal(adding.data.packs[0]?.code, "abcdefgj");
+  assert.equal(adding.data.packs[0]?.appendFrom, 1);
+  const more = step(adding.data, privateFile(8, 20, "附录.pdf"), now, nextCode);
+  assert.equal(more.data.packs[0]?.files.length, 2);
+  assert.equal(more.data.packs[0]?.code, "abcdefgj");
+  const cancelled = step(more.data, textMessage(9, 21, "❌取消并退出"), now, nextCode);
+  assert.equal(cancelled.data.packs[0]?.status, "ready");
+  assert.equal(cancelled.data.packs[0]?.files.length, 1);
+  const again = step(cancelled.data, press(10, "a:abcdefgj"), now, nextCode);
+  const kept = step(step(again.data, privateFile(11, 22, "附录.pdf"), now, nextCode).data, textMessage(12, 23, "✅确认"), now, nextCode);
+  assert.equal(kept.data.packs[0]?.status, "ready");
+  assert.equal(kept.data.packs[0]?.files.length, 2);
+  assert.match(kept.decision.replies[0]?.text ?? "", /文件数：2/);
+  const renaming = step(kept.data, press(13, "n:abcdefgj"), now, nextCode);
+  assert.equal(renaming.data.prompts[0]?.kind, "rename");
+  const renamed = step(renaming.data, textMessage(14, 24, "月报"), now, nextCode);
+  assert.equal(renamed.data.packs[0]?.name, "月报");
+  assert.equal(renamed.data.prompts.length, 0);
+  assert.match(renamed.decision.replies[0]?.text ?? "", /月报/);
+});
+
 test("cancel drops the open group before it has a code", () => {
   const nextCode = codes();
   const collected = step(baseData(), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode);
@@ -533,7 +556,7 @@ test("copies a collected file into the storage channel before it is named", asyn
     assert.equal(saved.packs[0]?.code, undefined);
     assert.equal(saved.packs[0]?.files[0]?.channelMessageId, 42);
     assert.equal(saved.packs[0]?.files[0]?.channelId, "-100555");
-    assert.match(sent[0] ?? "", /已收下 1 个/);
+    assert.match(sent[0] ?? "", /第1个文件/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

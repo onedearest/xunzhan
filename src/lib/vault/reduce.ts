@@ -6,8 +6,8 @@ import {
   isVaultCode,
   listText,
   menuAction,
+  folderText,
   packDetailText,
-  packedText,
   personName,
   queryItems,
   searchAskText,
@@ -36,7 +36,7 @@ export type Reply = {
   keyboard?: InlineButton[][];
   menu?: boolean;
   bar?: "finish";
-  armBar?: "finish";
+  armBar?: "finish" | "menu";
   trackOwnerId?: string;
   replyToMessageId?: number;
   messageThreadId?: number;
@@ -93,7 +93,7 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
       chatId: String(message.chat.id),
       replyToMessageId: message.message_id,
       messageThreadId: message.message_thread_id,
-      text: "这些功能请私聊我。点「存储」把文件发过来，结束之后再起名称。",
+      text: "这些功能请私聊我。点「存储」把文件发过来，点 ✅确认 之后再起名称。",
     });
   }
   if (!data.shareLinks || !data.botUsername) return { data, decision };
@@ -142,7 +142,7 @@ function reduceCallback(
       chatId,
       bar: open ? "finish" : undefined,
       menu: !open,
-      text: open ? "继续把文件发过来就会存进来。收完点下面的「结束」。" : "还没有待打包的文件。直接把文件发给我。",
+      text: open ? collectingText(open.files.length) : "还没有待打包的文件。直接把文件发给我。",
     });
     return { data, decision };
   }
@@ -185,6 +185,72 @@ function reduceCallback(
   const pack = readyPacks(data).find((entry) => entry.code === action.code);
   if (!pack?.code) {
     decision.callbackText = "没有这个编号";
+    return { data, decision };
+  }
+  if (action.type === "manage") {
+    if (pack.ownerId !== String(query.from.id)) {
+      decision.callbackText = "只能管理自己打包的";
+      return { data, decision };
+    }
+    return showFolder(data, decision, chatId, pack, messageId);
+  }
+  if (action.type === "add") {
+    if (pack.ownerId !== String(query.from.id)) {
+      decision.callbackText = "只能往自己的文件夹里加文件";
+      return { data, decision };
+    }
+    const open = openPack(data, query.from.id);
+    if (open && open.id !== pack.id) {
+      decision.callbackText = "先收完正在存的那一组";
+      decision.replies.push({
+        kind: "send",
+        chatId,
+        bar: "finish",
+        text: "先点 ✅确认 或 ❌取消并退出，再往别的文件夹里加文件。",
+      });
+      return { data, decision };
+    }
+    const next: VaultPack = {
+      ...pack,
+      status: "collecting",
+      appendFrom: pack.files.length,
+    };
+    decision.callbackText = "把文件发过来";
+    decision.replies.push({
+      ...collectingReply(next, chatId, collectingText(next.files.length)),
+      armBar: "finish",
+    });
+    return { data: upsertPack(data, next), decision };
+  }
+  if (action.type === "rename") {
+    if (pack.ownerId !== String(query.from.id)) {
+      decision.callbackText = "只能改自己的名称";
+      return { data, decision };
+    }
+    decision.callbackText = "把新名称发过来";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: `现在的名称是「${pack.name || "未命名"}」。\n\n把新名称发过来。`,
+    });
+    return { data: askRename(data, query.from.id, pack.code), decision };
+  }
+  if (action.type === "share") {
+    if (!canRead(data, pack, query.from.id)) {
+      decision.callbackText = "这个文件包只有打包的人能分享";
+      return { data, decision };
+    }
+    decision.callbackText = "可以把这条转出去";
+    const link =
+      data.shareLinks && data.botUsername && pack.code ? `https://t.me/${data.botUsername}?start=${pack.code}` : "";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      text: link
+        ? `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件\n${link}\n\n把这条转给别人，对方打开就能取回。`
+        : "分享已关闭，这个编号只有打包的人能取回。",
+    });
     return { data, decision };
   }
   if (action.type === "get") {
@@ -285,20 +351,15 @@ function reduceCommand(
     return { data, decision };
   }
   if (command.name === "finish") {
+    const open = openPack(data, user.id);
+    if (open?.code) return finishAppend(data, decision, user.id);
     return askName(data, decision, chatId, user.id);
   }
   if (command.name === "page-prev" || command.name === "page-next") {
-    return turnCollectingPage(data, decision, chatId, user.id, command.name === "page-next" ? 1 : -1);
+    return turnCollectingPage(data, decision, chatId, user.id);
   }
   if (command.name === "cancel") {
-    const open = openPack(data, user.id);
-    decision.replies.push({
-      kind: "send",
-      chatId,
-      menu: true,
-      text: open ? "已取消这一组，还没有编号。" : "现在没有还没起名的一组。",
-    });
-    return open ? { data: dropOpen(data, user.id), decision } : { data, decision };
+    return cancelOpen(data, decision, chatId, user.id);
   }
   if (command.name === "list" || command.name === "folders") {
     return listPacks(data, decision, chatId, user.id, positivePage(command.arg));
@@ -373,9 +434,16 @@ function reduceIncoming(
   const user = message.from as TgUser;
   const open = openPack(data, user.id);
   const draft = draftFromMessage(message);
-  const searching = (data.prompts ?? []).some((item) => item.ownerId === String(user.id) && item.kind === "search");
-  if (searching && draft?.kind === "text" && draft.text) {
+  const prompt = (data.prompts ?? []).find((item) => item.ownerId === String(user.id));
+  if (prompt?.kind === "search" && draft?.kind === "text" && draft.text) {
     return searchPacks(clearPrompt(data, user.id), decision, chatId, user.id, draft.text);
+  }
+  if (prompt?.kind === "rename") {
+    if (draft?.kind === "text" && draft.text) {
+      return renamePack(clearPrompt(data, user.id), decision, user.id, prompt.code, draft.text);
+    }
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "新名称是一段文字。把名称发过来。" });
+    return { data, decision };
   }
   if (open?.status === "naming" && draft?.kind === "text" && draft.text) {
     return finishPack(clearPrompt(data, user.id), decision, user.id, draft.text, options);
@@ -388,8 +456,8 @@ function reduceIncoming(
         open?.status === "naming"
           ? "把名称发过来。名称就是一段文字，不要发命令。"
           : open
-            ? "这一组还没收完。继续发文件，或者点「结束」再起名称。"
-            : "把文件、图片、视频或语音发给我。可以连续发，结束之后再起名称。",
+            ? "这一组还没收完。继续发文件，或者点底部的 ✅确认。"
+            : "把文件、图片、视频或语音发给我。可以连续发，点 ✅确认 之后再起名称。",
         decision,
       ),
       menu: !(open && open.status !== "naming"),
@@ -420,7 +488,7 @@ function reduceIncoming(
       kind: "send",
       chatId,
       bar: "finish",
-      text: `这一组已经有 ${open.files.length} 个了。点下面的「结束」，再起个名称。`,
+      text: `这一组已经有 ${open.files.length} 个了。点底部的 ✅确认 完成存储。`,
     });
     return { data, decision };
   }
@@ -449,10 +517,9 @@ function reduceIncoming(
   if (data.channelId) {
     decision.copy = { fromChat: chatId, messageId: message.message_id, toChat: data.channelId };
   }
-  const shown = collectingText(pack.files);
-  const hinted = withHint(shown.text, decision);
-  decision.replies.push(collectingReply({ ...pack, noticePage: shown.page }, chatId, hinted));
-  return { data: clearPrompt(upsertPack(data, { ...pack, noticePage: shown.page }), user.id), decision };
+  const hinted = withHint(collectingText(pack.files.length), decision);
+  decision.replies.push(collectingReply(pack, chatId, hinted));
+  return { data: clearPrompt(upsertPack(data, pack), user.id), decision };
 }
 
 function askName(data: VaultData, decision: Decision, chatId: string, userId: number) {
@@ -491,17 +558,7 @@ function finishPack(data: VaultData, decision: Decision, userId: number, rawName
     name: name.slice(0, 80),
     readyAt: options.now,
   };
-  decision.replies.push({
-    kind: "send",
-    chatId,
-    text: packedText(pack, { username: data.botUsername, shareLinks: data.shareLinks }),
-    keyboard: [
-      [
-        { text: "取回", callback_data: `g:${code}` },
-        { text: "删除", callback_data: `d:${code}` },
-      ],
-    ],
-  });
+  decision.replies.push(folderReply(data, pack.files[0]?.chatId || "", pack));
   return { data: clearPrompt(upsertPack(data, pack), userId), decision };
 }
 
@@ -545,14 +602,90 @@ function askSearch(data: VaultData, userId: number): VaultData {
   return { ...data, prompts: [...prompts, { ownerId: String(userId), kind: "search" }] };
 }
 
+function finishAppend(data: VaultData, decision: Decision, userId: number) {
+  const open = openPack(data, userId);
+  const chatId = open?.files[0]?.chatId || "";
+  if (!open?.code || !chatId) return askName(data, decision, chatId, userId);
+  const pack: VaultPack = { ...open, status: "ready", appendFrom: undefined };
+  decision.replies.push(folderReply(data, chatId, pack, true));
+  return { data: upsertPack(data, pack), decision };
+}
+
+function cancelOpen(data: VaultData, decision: Decision, chatId: string, userId: number) {
+  const open = openPack(data, userId);
+  if (open?.code) {
+    const pack: VaultPack = {
+      ...open,
+      status: "ready",
+      files: open.files.slice(0, open.appendFrom ?? open.files.length),
+      appendFrom: undefined,
+    };
+    decision.replies.push(folderReply(data, chatId, pack, true));
+    return { data: upsertPack(data, pack), decision };
+  }
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    menu: true,
+    text: open ? "已取消这一组，还没有编号。" : "现在没有还没起名的一组。",
+  });
+  return open ? { data: dropOpen(data, userId), decision } : { data, decision };
+}
+
+function showFolder(
+  data: VaultData,
+  decision: Decision,
+  chatId: string,
+  pack: VaultPack,
+  messageId?: number,
+) {
+  decision.callbackText = pack.name || "文件夹";
+  decision.replies.push({ ...folderReply(data, chatId, pack, false), kind: messageId ? "edit" : "send", messageId });
+  return { data, decision };
+}
+
+function folderReply(data: VaultData, chatId: string, pack: VaultPack, restoreMenu: boolean): Reply {
+  return {
+    kind: pack.noticeMessageId && restoreMenu ? "edit" : "send",
+    chatId,
+    messageId: restoreMenu ? pack.noticeMessageId : undefined,
+    text: folderText(pack, { username: data.botUsername, shareLinks: data.shareLinks }),
+    keyboard: folderKeyboard(pack),
+    armBar: restoreMenu ? "menu" : undefined,
+  };
+}
+
+function askRename(data: VaultData, userId: number, code: string): VaultData {
+  const prompts = (data.prompts ?? []).filter((item) => item.ownerId !== String(userId));
+  return { ...data, prompts: [...prompts, { ownerId: String(userId), kind: "rename", code }] };
+}
+
+function renamePack(data: VaultData, decision: Decision, userId: number, code: string, rawName: string) {
+  const chatId = String(userId);
+  const pack = readyPacks(data).find((entry) => entry.code === code && entry.ownerId === String(userId));
+  const name = rawName.replace(/\s+/g, " ").trim();
+  if (!pack?.code) {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "没有这个编号。" });
+    return { data, decision };
+  }
+  if (!name) {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "名称不能为空。再发一次。" });
+    return { data, decision };
+  }
+  const next = { ...pack, name: name.slice(0, 80) };
+  decision.replies.push(folderReply(data, chatId, next, false));
+  decision.replies[decision.replies.length - 1]!.menu = true;
+  return { data: upsertPack(data, next), decision };
+}
+
 function collectingReply(pack: VaultPack, chatId: string, text: string): Reply {
   if (pack.noticeMessageId) {
-    return { kind: "edit", chatId, messageId: pack.noticeMessageId, text, trackOwnerId: pack.ownerId };
+    return { kind: "edit", chatId, messageId: pack.noticeMessageId, text, keyboard: [], trackOwnerId: pack.ownerId };
   }
   return { kind: "send", chatId, text, armBar: "finish", trackOwnerId: pack.ownerId };
 }
 
-function turnCollectingPage(data: VaultData, decision: Decision, chatId: string, userId: number, delta: number) {
+function turnCollectingPage(data: VaultData, decision: Decision, chatId: string, userId: number) {
   const open = openPack(data, userId);
   if (!open || open.status === "naming") {
     decision.replies.push({
@@ -564,31 +697,25 @@ function turnCollectingPage(data: VaultData, decision: Decision, chatId: string,
     });
     return { data, decision };
   }
-  const current = open.noticePage ?? Math.max(1, Math.ceil(open.files.length / VAULT_LIMITS.filePageSize));
-  const shown = collectingText(open.files, current + delta);
-  if (shown.page === current) {
-    decision.replies.push({
-      kind: "send",
-      chatId,
-      bar: "finish",
-      text: delta < 0 ? "已经是第一页。" : "已经是最后一页。",
-    });
-    return { data, decision };
-  }
-  const pack = { ...open, noticePage: shown.page };
-  decision.replies.push(collectingReply(pack, chatId, shown.text));
-  return { data: upsertPack(data, pack), decision };
+  decision.replies.push(collectingReply(open, chatId, collectingText(open.files.length)));
+  return { data, decision };
 }
 
 function packKeyboard(packs: VaultPack[], page: number, pages: number, viewerId: string) {
   const ready = packs.filter((pack) => pack.code);
   if (!ready.length) return undefined;
   const rows: InlineButton[][] = ready.map((pack) => {
-    const row: InlineButton[] = [
-      { text: `查看 ${clipName(pack.name)}`, callback_data: `v:${pack.code}` },
-      { text: "取回", callback_data: `g:${pack.code}` },
-    ];
-    if (pack.ownerId === viewerId) row.push({ text: "删除", callback_data: `d:${pack.code}` });
+    const row: InlineButton[] =
+      pack.ownerId === viewerId
+        ? [
+            { text: `管理 ${clipName(pack.name)}`, callback_data: `m:${pack.code}` },
+            { text: "取回", callback_data: `g:${pack.code}` },
+            { text: "删除", callback_data: `d:${pack.code}` },
+          ]
+        : [
+            { text: `查看 ${clipName(pack.name)}`, callback_data: `v:${pack.code}` },
+            { text: "取回", callback_data: `g:${pack.code}` },
+          ];
     return row;
   });
   const nav: InlineButton[] = [];
@@ -596,6 +723,25 @@ function packKeyboard(packs: VaultPack[], page: number, pages: number, viewerId:
   if (page < pages) nav.push({ text: "下一页", callback_data: `l:${page + 1}` });
   if (nav.length) rows.push(nav);
   return rows;
+}
+
+function folderKeyboard(pack: VaultPack) {
+  const code = pack.code || "";
+  return [
+    [
+      { text: "📂添加文件", callback_data: `a:${code}` },
+      { text: "👀查看内容", callback_data: `v:${code}:1` },
+    ],
+    [
+      { text: "✏️修改名称", callback_data: `n:${code}` },
+      { text: "🗑删除", callback_data: `d:${code}` },
+    ],
+    [
+      { text: "取回", callback_data: `g:${code}` },
+      { text: "🔗分享给别人", callback_data: `s:${code}` },
+    ],
+    [{ text: "< 返回", callback_data: "l:1" }],
+  ];
 }
 
 function detailKeyboard(pack: VaultPack, viewerId: string, page: number, pages: number) {
@@ -606,7 +752,7 @@ function detailKeyboard(pack: VaultPack, viewerId: string, page: number, pages: 
   if (page > 1) nav.push({ text: "上一页", callback_data: `v:${pack.code}:${page - 1}` });
   if (page < pages) nav.push({ text: "下一页", callback_data: `v:${pack.code}:${page + 1}` });
   if (nav.length) rows.push(nav);
-  rows.push([{ text: "返回文件夹", callback_data: "l:1" }]);
+  rows.push([{ text: "< 返回", callback_data: pack.ownerId === viewerId ? `m:${pack.code}` : "l:1" }]);
   return rows;
 }
 
@@ -622,7 +768,16 @@ function parseAction(data: string) {
   if (data === "x") return { type: "cancel" as const };
   const list = /^l:(\d{1,4})$/.exec(data);
   if (list) return { type: "list" as const, page: Number(list[1]) };
-  const get = /^g:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
+  const codeOf = (prefix: string) => new RegExp(`^${prefix}:([abcdefghjkmnpqrstuvwxyz23456789]{8})$`).exec(data);
+  const manage = codeOf("m");
+  if (manage) return { type: "manage" as const, code: manage[1] };
+  const add = codeOf("a");
+  if (add) return { type: "add" as const, code: add[1] };
+  const rename = codeOf("n");
+  if (rename) return { type: "rename" as const, code: rename[1] };
+  const share = codeOf("s");
+  if (share) return { type: "share" as const, code: share[1] };
+  const get = codeOf("g");
   if (get) return { type: "get" as const, code: get[1] };
   const view = /^v:([abcdefghjkmnpqrstuvwxyz23456789]{8})(?::(\d{1,4}))?$/.exec(data);
   if (view) return { type: "view" as const, code: view[1], page: view[2] ? Number(view[2]) : 1 };
@@ -650,10 +805,10 @@ function dropOpen(data: VaultData, userId: number): VaultData {
 }
 
 function upsertPack(data: VaultData, pack: VaultPack): VaultData {
-  const rest = data.packs.filter((entry) => entry.id !== pack.id && !(entry.ownerId === pack.ownerId && entry.status !== "ready" && pack.status === "ready"));
-  const withoutOldDraft = data.packs.filter((entry) => entry.ownerId !== pack.ownerId || entry.status === "ready");
-  if (pack.status === "ready") return { ...data, packs: [...withoutOldDraft, pack] };
-  return { ...data, packs: [...rest.filter((entry) => entry.id !== pack.id), pack] };
+  const others = data.packs.filter(
+    (entry) => entry.id !== pack.id && !(entry.ownerId === pack.ownerId && entry.status !== "ready"),
+  );
+  return { ...data, packs: [...others, pack] };
 }
 
 function alreadyStored(data: VaultData, chatId: string, messageId: number) {

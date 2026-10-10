@@ -138,11 +138,13 @@ export function menuKeyboard() {
   ];
 }
 
+export const COLLECT = {
+  cancel: "❌取消并退出",
+  confirm: "✅确认",
+} as const;
+
 export function collectingBar() {
-  return [
-    [{ text: "上一页" }, { text: "下一页" }],
-    [{ text: "结束" }],
-  ];
+  return [[{ text: COLLECT.cancel }, { text: COLLECT.confirm }]];
 }
 
 export function menuAction(text: string) {
@@ -151,7 +153,8 @@ export function menuAction(text: string) {
   if (value === MENU.store) return "store" as const;
   if (value === MENU.folders || value === "查看文件夹") return "folders" as const;
   if (value === MENU.search) return "search" as const;
-  if (value === "结束") return "finish" as const;
+  if (value === COLLECT.confirm || value === "确认" || value === "结束") return "finish" as const;
+  if (value === COLLECT.cancel || value === "取消并退出") return "cancel" as const;
   if (value === "上一页") return "page-prev" as const;
   if (value === "下一页") return "page-next" as const;
   return null;
@@ -164,16 +167,8 @@ export function filePage<T>(items: T[], requested?: number) {
   return { page, pages, start, slice: items.slice(start, start + VAULT_LIMITS.filePageSize) };
 }
 
-export function collectingText(files: { name: string }[], requested?: number) {
-  const shown = filePage(files, requested ?? Math.max(1, Math.ceil(files.length / VAULT_LIMITS.filePageSize)));
-  const lines = [
-    `已收下 ${files.length} 个，先放在同一组里。`,
-    "继续发文件就会存进来。收完点下面的「结束」，再起个名称。",
-    "",
-    ...shown.slice.map((file, index) => `${shown.start + index + 1}. ${clip(file.name, 40)}`),
-  ];
-  if (shown.pages > 1) lines.push("", `第 ${shown.page}/${shown.pages} 页`);
-  return { text: lines.join("\n"), page: shown.page, pages: shown.pages };
+export function collectingText(count: number) {
+  return [`已接收你发送的第${count}个文件`, "", "你可以继续发送文件，或点击底部菜单 ✅确认 完成存储"].join("\n");
 }
 
 export function storeText(open?: { status: "collecting" | "naming"; count: number }) {
@@ -181,9 +176,9 @@ export function storeText(open?: { status: "collecting" | "naming"; count: numbe
     return `这一组有 ${open.count} 个文件。\n\n把名称发过来，我再生成编号和链接。`;
   }
   if (open?.status === "collecting") {
-    return `这一组已经有 ${open.count} 个。\n\n继续发文件就会存进来。收完点下面的「结束」，再起个名称。`;
+    return collectingText(open.count);
   }
-  return ["直接把文件、图片、视频或语音发给我，可以连续发。", "它们先放在同一组里。", "发完点「结束」，再发一个名称。我才会生成编号和链接。"].join("\n");
+  return ["直接把文件、图片、视频或语音发给我，可以连续发。", "收完点底部的 ✅确认，再起个名称。我才会生成编号和链接。"].join("\n");
 }
 
 export function searchAskText() {
@@ -195,7 +190,7 @@ export function welcomeText(options: { username?: string; shareLinks: boolean; c
     "用下面的菜单就行。",
     "",
     "开始：看这段说明",
-    "存储：把文件发给我，结束之后再起名称",
+    "存储：把文件发给我，点 ✅确认 之后再起名称",
     "查看文件夹（打包好的）：看到有哪些文件包，点「查看」能看里面的文件",
     "搜索关键词：按名称找文件包",
     "",
@@ -214,6 +209,44 @@ export function welcomeText(options: { username?: string; shareLinks: boolean; c
     lines.push("", "文件留在 Telegram 上。网页里如果绑定了私密频道，会再复制一份进去。");
   }
   return lines.join("\n");
+}
+
+export function folderText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
+  const lines = [
+    "状态：可取回",
+    `创建时间：${formatWhen(pack.createdAt)}`,
+    "",
+    "存储统计：",
+    `· 文件数：${pack.files.length}`,
+    "",
+    "分享信息：",
+    `· 名称：${clip(pack.name || "未命名", 80)}`,
+    `· 编号：${pack.code}`,
+  ];
+  if (options.shareLinks && options.username && pack.code) {
+    lines.push(`· 链接：https://t.me/${options.username}?start=${pack.code}`);
+  } else {
+    lines.push("· 链接：只有你自己能取回");
+  }
+  lines.push("", "请选择文件夹操作");
+  return lines.join("\n");
+}
+
+function formatWhen(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${pick("year")}-${pick("month")}-${pick("day")} ${pick("hour")}:${pick("minute")}:${pick("second")}`;
 }
 
 export function packedText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
@@ -237,7 +270,7 @@ export function packedText(pack: VaultPack, options: { username?: string; shareL
 export function listText(packs: VaultPack[], page: number, pages: number, total: number, viewerId: string, shared: boolean) {
   if (total === 0) {
     return shared
-      ? "还没有打包好的文件夹。点「存储」，把文件发过来，结束之后再起名称。"
+      ? "还没有打包好的文件夹。点「存储」，把文件发过来，点 ✅确认 之后再起名称。"
       : "分享已关闭，这里只显示你自己打包的。你还没有文件夹。";
   }
   const lines = packs.map((pack, index) => {
