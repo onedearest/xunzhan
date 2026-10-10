@@ -3,10 +3,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applyVaultUpdate, deliverItem, type VaultIO } from "./vault/apply";
+import { applyVaultUpdate, deliverItem, deliverPack, type VaultIO } from "./vault/apply";
 import { BotApiError, BotClient, botCommands, canPostInChannel, explainBot } from "./vault/bot-client";
 import {
   commandOf,
+  deliveryBatches,
   draftFromMessage,
   formatSize,
   maskToken,
@@ -521,6 +522,64 @@ test("chooses channel copy before a file id from another bot", () => {
   assert.equal(retrievalPlan(item, "2"), "channel");
   assert.equal(retrievalPlan({ ...item, channelId: undefined, channelMessageId: undefined }, "2"), "unavailable");
   assert.equal(retrievalPlan({ ...item, channelId: undefined, channelMessageId: undefined }, "1"), "file");
+});
+
+test("splits a retrieved pack into albums of ten", () => {
+  const photos = Array.from({ length: 12 }, (_, index) => storedFile(index + 1, "99"));
+  photos.forEach((file, index) => {
+    file.kind = index === 10 ? "video" : "photo";
+    file.fileId = `p${index}`;
+  });
+  const document = { ...storedFile(30, "99"), kind: "document" as const, fileId: "doc" };
+  const voice = { ...storedFile(31, "99"), kind: "voice" as const, fileId: "voice" };
+  const foreign = { ...storedFile(32, "1"), kind: "photo" as const, fileId: "other" };
+  const batches = deliveryBatches([...photos, document, document, voice, foreign], "99");
+  assert.equal(batches[0]?.mode, "album");
+  assert.equal(batches[0]?.mode === "album" ? batches[0].files.length : 0, 10);
+  assert.equal(batches[1]?.mode, "album");
+  assert.equal(batches[1]?.mode === "album" ? batches[1].files.length : 0, 2);
+  assert.equal(batches[2]?.mode, "album");
+  assert.equal(batches[3]?.mode, "single");
+  assert.equal(batches[3]?.mode === "single" ? batches[3].file.kind : "", "voice");
+  assert.equal(batches[4]?.mode === "single" ? batches[4].file.botId : "", "1");
+});
+
+test("sends retrieval albums of ten and falls back one by one", async () => {
+  const sent: string[] = [];
+  const groups: { count: number; caption?: string }[] = [];
+  const files = Array.from({ length: 11 }, (_, index) => ({
+    ...storedFile(index + 1, "99"),
+    kind: "document" as const,
+    fileId: `d${index}`,
+    channelId: undefined,
+    channelMessageId: undefined,
+  }));
+  const client = {
+    async sendMessage(_chatId: string, text: string) {
+      sent.push(text);
+    },
+    async sendMediaGroup(_chatId: string, media: { media: string; caption?: string }[]) {
+      groups.push({ count: media.length, caption: media[0]?.caption });
+    },
+    async copyMessage() {
+      throw new Error("没有频道");
+    },
+    async sendFile() {
+      sent.push("file");
+    },
+  };
+  await deliverPack(client as unknown as BotClient, "7", { ...readyPack(0), name: "短剧", files }, "99");
+  assert.deepEqual(groups, [{ count: 10, caption: "第 1/2 组，10 个" }]);
+  assert.match(sent[0] ?? "", /按 10 个一组发出/);
+  assert.match(sent.join("\n"), /第 2\/2 组，1 个/);
+  assert.equal(sent.filter((line) => line === "file").length, 1);
+
+  sent.length = 0;
+  client.sendMediaGroup = async () => {
+    throw new Error("这一组发不出去");
+  };
+  await deliverPack(client as unknown as BotClient, "7", { ...readyPack(0), name: "短剧", files: files.slice(0, 2) }, "99");
+  assert.equal(sent.filter((line) => line === "file").length, 2);
 });
 
 test("sends the stored file back through the bot client", async () => {

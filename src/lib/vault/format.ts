@@ -303,6 +303,53 @@ export function retrievalPlan(item: VaultFile, currentBotId?: string) {
   return "unavailable" as const;
 }
 
+export type DeliveryBatch =
+  | { mode: "album"; files: VaultFile[] }
+  | { mode: "single"; file: VaultFile };
+
+type AlbumKind = "photo" | "video" | "document" | "audio";
+
+function albumKind(file: VaultFile, currentBotId?: string): AlbumKind | null {
+  const sameBot = !file.botId || !currentBotId || file.botId === currentBotId;
+  if (!sameBot || !file.fileId) return null;
+  if (file.kind === "photo" || file.kind === "video" || file.kind === "document" || file.kind === "audio") {
+    return file.kind;
+  }
+  return null;
+}
+
+function sameAlbum(left: AlbumKind, right: AlbumKind) {
+  if (left === "document" || right === "document") return left === "document" && right === "document";
+  if (left === "audio" || right === "audio") return left === "audio" && right === "audio";
+  return true;
+}
+
+export function deliveryBatches(files: VaultFile[], currentBotId?: string): DeliveryBatch[] {
+  const batches: DeliveryBatch[] = [];
+  let run: VaultFile[] = [];
+  let runKind: AlbumKind | null = null;
+  const flush = () => {
+    if (run.length === 1) batches.push({ mode: "single", file: run[0] });
+    else if (run.length > 1) batches.push({ mode: "album", files: run });
+    run = [];
+    runKind = null;
+  };
+  for (const file of files) {
+    const kind = albumKind(file, currentBotId);
+    if (!kind || (runKind && !sameAlbum(runKind, kind)) || run.length >= VAULT_LIMITS.filePageSize) {
+      flush();
+    }
+    if (!kind) {
+      batches.push({ mode: "single", file });
+      continue;
+    }
+    runKind = runKind ?? kind;
+    run.push(file);
+  }
+  flush();
+  return batches;
+}
+
 export function queryItems<T extends { name: string; caption?: string; text?: string; code: string; ownerName: string; ownerUsername?: string; createdAt: string }>(
   items: T[],
   query: string,

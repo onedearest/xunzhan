@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { explainBot, type BotClient } from "./bot-client";
-import { retrievalPlan } from "./format";
+import { deliveryBatches, retrievalPlan } from "./format";
 import { reduceVault, type Decision, type Reply } from "./reduce";
 import type { VaultRepository } from "./store";
 import { CODE_ALPHABET, VAULT_LIMITS, type InlineButton, type TgUpdate, type VaultFile, type VaultPack } from "./types";
@@ -41,10 +41,45 @@ export function ioFromClient(client: BotClient): VaultIO {
 }
 
 export async function deliverPack(client: BotClient, chatId: string, pack: VaultPack, currentBotId?: string) {
-  await client.sendMessage(chatId, `「${pack.name || "未命名"}」共 ${pack.files.length} 个`);
-  for (const file of pack.files) {
-    await deliverItem(client, chatId, file, currentBotId);
+  const batches = deliveryBatches(pack.files, currentBotId);
+  const grouped = batches.some((batch) => batch.mode === "album");
+  await client.sendMessage(
+    chatId,
+    grouped
+      ? `「${pack.name || "未命名"}」共 ${pack.files.length} 个，按 ${VAULT_LIMITS.filePageSize} 个一组发出`
+      : `「${pack.name || "未命名"}」共 ${pack.files.length} 个`,
+  );
+  const showIndex = grouped && batches.length > 1;
+  let index = 0;
+  for (const batch of batches) {
+    index += 1;
+    if (batch.mode === "single") {
+      if (showIndex) await client.sendMessage(chatId, `第 ${index}/${batches.length} 组，1 个`);
+      await deliverItem(client, chatId, batch.file, currentBotId);
+      continue;
+    }
+    const label = showIndex ? `第 ${index}/${batches.length} 组，${batch.files.length} 个` : undefined;
+    try {
+      await client.sendMediaGroup(
+        chatId,
+        batch.files.map((file, fileIndex) => ({
+          type: file.kind as "photo" | "video" | "document" | "audio",
+          media: file.fileId || "",
+          caption: fileIndex === 0 && label ? joinCaption(label, file.caption) : file.caption,
+        })),
+      );
+    } catch {
+      if (label) await client.sendMessage(chatId, label);
+      for (const file of batch.files) {
+        await deliverItem(client, chatId, file, currentBotId);
+      }
+    }
   }
+}
+
+function joinCaption(label: string, caption?: string) {
+  const own = caption?.trim();
+  return own ? `${label}\n${own}` : label;
 }
 
 export async function deliverItem(client: BotClient, chatId: string, item: VaultFile, currentBotId?: string) {

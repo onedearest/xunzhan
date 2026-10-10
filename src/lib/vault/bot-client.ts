@@ -203,6 +203,20 @@ export class BotClient {
     return this.call("deleteMessage", { chat_id: chatId, message_id: messageId });
   }
 
+  sendMediaGroup(
+    chatId: string,
+    media: { type: "photo" | "video" | "document" | "audio"; media: string; caption?: string }[],
+  ) {
+    return this.call<Array<{ message_id: number }>>("sendMediaGroup", {
+      chat_id: chatId,
+      media: media.map((item) => ({
+        type: item.type,
+        media: item.media,
+        ...(item.caption ? { caption: item.caption.slice(0, 1024) } : {}),
+      })),
+    });
+  }
+
   sendFile(chatId: string, item: VaultFile) {
     if (item.kind === "text" || !item.fileId) {
       return this.sendMessage(chatId, item.text || item.name);
