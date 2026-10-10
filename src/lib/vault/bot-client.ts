@@ -1,3 +1,4 @@
+import { menuKeyboard } from "./format";
 import type { InlineButton, TgChat, TgUpdate, TgUser, VaultFile, VaultKind } from "./types";
 
 const API = "https://api.telegram.org";
@@ -61,13 +62,15 @@ const fileMethod: Record<Exclude<VaultKind, "text">, { method: string; field: st
 };
 
 export const botCommands = [
-  { command: "start", description: "开始使用" },
-  { command: "help", description: "查看怎么存、怎么取" },
-  { command: "list", description: "我打包好的" },
-  { command: "search", description: "按名称搜索" },
-  { command: "get", description: "按编号取回" },
-  { command: "del", description: "按编号删除" },
+  { command: "start", description: "开始" },
+  { command: "store", description: "存储" },
+  { command: "folders", description: "查看文件夹（打包好的）" },
+  { command: "search", description: "搜索关键词" },
+  { command: "get", description: "按编号取回这一组" },
+  { command: "del", description: "删除这一组" },
+  { command: "cancel", description: "取消还没起名的一组" },
   { command: "stats", description: "查看用量" },
+  { command: "help", description: "查看用法" },
 ];
 
 export function canPostInChannel(member: Member) {
@@ -149,11 +152,15 @@ export class BotClient {
     return result.message_id;
   }
 
-  sendMessage(chatId: string, text: string, keyboard?: InlineButton[][]) {
+  sendMessage(chatId: string, text: string, keyboard?: InlineButton[][], menu?: boolean) {
     return this.call("sendMessage", {
       chat_id: chatId,
       text: text.slice(0, 4096),
-      reply_markup: keyboard ? { inline_keyboard: keyboard } : undefined,
+      reply_markup: keyboard
+        ? { inline_keyboard: keyboard }
+        : menu
+          ? { keyboard: menuKeyboard(), resize_keyboard: true, is_persistent: true }
+          : undefined,
     });
   }
 

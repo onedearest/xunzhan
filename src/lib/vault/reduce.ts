@@ -3,11 +3,14 @@ import {
   draftFromMessage,
   isVaultCode,
   listText,
+  menuAction,
   packedText,
   personName,
   queryItems,
+  searchAskText,
   searchText,
   statsText,
+  storeText,
   welcomeText,
 } from "./format";
 import {
@@ -28,6 +31,7 @@ export type Reply = {
   messageId?: number;
   text: string;
   keyboard?: InlineButton[][];
+  menu?: boolean;
 };
 
 export type Decision = {
@@ -71,17 +75,19 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
   }
   if (message.chat.type !== "private") {
     const command = commandOf(message.text);
-    if (command?.name === "start" || command?.name === "help") {
+    if (command && ["start", "help", "store", "folders", "list", "search"].includes(command.name)) {
       decision.replies.push({
         kind: "send",
         chatId: String(message.chat.id),
-        text: "打包请私聊我。把文件直接发给我，结束之后再起名称。",
+        text: "这些功能请私聊我。点「存储」把文件发过来，结束之后再起名称。",
       });
     }
     return { data: next, decision };
   }
   const command = commandOf(message.text);
-  if (command) return reduceCommand(next, message, command, decision);
+  if (command) return reduceCommand(clearPrompt(next, message.from.id), message, command, decision);
+  const action = message.text ? menuAction(message.text) : null;
+  if (action) return reduceCommand(clearPrompt(next, message.from.id), message, { name: action, arg: "" }, decision);
   return reduceIncoming(next, message, decision, options);
 }
 
@@ -127,7 +133,8 @@ function reduceCallback(
       kind: messageId ? "edit" : "send",
       chatId,
       messageId,
-      text: "已取消。发送 /list 可以再看。",
+      text: "已取消。点「查看文件夹（打包好的）」可以再看。",
+      menu: true,
     });
     return { data, decision };
   }
@@ -204,6 +211,7 @@ function reduceCommand(
     decision.replies.push({
       kind: "send",
       chatId,
+      menu: true,
       text: withHint(
         welcomeText({
           username: data.botUsername,
@@ -215,50 +223,49 @@ function reduceCommand(
     });
     return { data, decision };
   }
+  if (command.name === "store") {
+    const open = openPack(data, user.id);
+    const naming = open?.status === "naming";
+    const collecting = Boolean(open && !naming);
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: !collecting && !naming,
+      text: storeText(open ? { status: naming ? "naming" : "collecting", count: open.files.length } : undefined),
+      keyboard: collecting ? collectKeyboard : naming ? [[{ text: "取消这组", callback_data: "z" }]] : undefined,
+    });
+    return { data, decision };
+  }
   if (command.name === "cancel") {
     const open = openPack(data, user.id);
     decision.replies.push({
       kind: "send",
       chatId,
+      menu: true,
       text: open ? "已取消这一组，还没有编号。" : "现在没有还没起名的一组。",
     });
     return open ? { data: dropOpen(data, user.id), decision } : { data, decision };
   }
-  if (command.name === "list") {
-    const owned = readyPacks(data, user.id);
-    const listed = queryPacks(owned, "", positivePage(command.arg), VAULT_LIMITS.userPageSize);
-    decision.replies.push({
-      kind: "send",
-      chatId,
-      text: listText(listed.items, listed.page, listed.pages, listed.total),
-      keyboard: packKeyboard(listed.items, listed.page, listed.pages),
-    });
-    return { data, decision };
+  if (command.name === "list" || command.name === "folders") {
+    return listPacks(data, decision, chatId, user.id, positivePage(command.arg));
   }
   if (command.name === "search") {
     if (!command.arg) {
-      decision.replies.push({ kind: "send", chatId, text: "用法：/search 后面跟上名称里的词。" });
-      return { data, decision };
+      decision.replies.push({ kind: "send", chatId, menu: true, text: searchAskText() });
+      return { data: askSearch(data, user.id), decision };
     }
-    const found = queryPacks(readyPacks(data, user.id), command.arg, 1, VAULT_LIMITS.userPageSize);
-    decision.replies.push({
-      kind: "send",
-      chatId,
-      text: searchText(command.arg, found.items, found.total),
-      keyboard: packKeyboard(found.items, 1, 1),
-    });
-    return { data, decision };
+    return searchPacks(data, decision, chatId, user.id, command.arg);
   }
   if (command.name === "get") {
     if (!command.arg) {
-      decision.replies.push({ kind: "send", chatId, text: "用法：/get 后面跟上编号。" });
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "用法：/get 后面跟上编号。也可以点「查看文件夹（打包好的）」。" });
       return { data, decision };
     }
     return deliverCode(data, decision, chatId, user.id, command.arg);
   }
   if (command.name === "del") {
     if (!isVaultCode(command.arg)) {
-      decision.replies.push({ kind: "send", chatId, text: "用法：/del 后面跟上编号。" });
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "用法：/del 后面跟上编号。也可以在文件夹里点删除。" });
       return { data, decision };
     }
     return removePack(data, decision, chatId, user.id, command.arg);
@@ -267,11 +274,38 @@ function reduceCommand(
     decision.replies.push({
       kind: "send",
       chatId,
+      menu: true,
       text: statsText(readyPacks(data, user.id), data.channelTitle || data.channelId),
     });
     return { data, decision };
   }
-  decision.replies.push({ kind: "send", chatId, text: "没有这个命令。发送 /help 看用法。" });
+  decision.replies.push({ kind: "send", chatId, menu: true, text: "没有这个命令。点「开始」看用法。" });
+  return { data, decision };
+}
+
+function listPacks(data: VaultData, decision: Decision, chatId: string, userId: number, page: number) {
+  const listed = queryPacks(readyPacks(data, userId), "", page, VAULT_LIMITS.userPageSize);
+  const keyboard = packKeyboard(listed.items, listed.page, listed.pages);
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    menu: !keyboard,
+    text: listText(listed.items, listed.page, listed.pages, listed.total),
+    keyboard,
+  });
+  return { data, decision };
+}
+
+function searchPacks(data: VaultData, decision: Decision, chatId: string, userId: number, query: string) {
+  const found = queryPacks(readyPacks(data, userId), query, 1, VAULT_LIMITS.userPageSize);
+  const keyboard = packKeyboard(found.items, 1, 1);
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    menu: !keyboard,
+    text: searchText(query, found.items, found.total),
+    keyboard,
+  });
   return { data, decision };
 }
 
@@ -285,8 +319,12 @@ function reduceIncoming(
   const user = message.from as TgUser;
   const open = openPack(data, user.id);
   const draft = draftFromMessage(message);
+  const searching = (data.prompts ?? []).some((item) => item.ownerId === String(user.id) && item.kind === "search");
+  if (searching && draft?.kind === "text" && draft.text) {
+    return searchPacks(clearPrompt(data, user.id), decision, chatId, user.id, draft.text);
+  }
   if (open?.status === "naming" && draft?.kind === "text" && draft.text) {
-    return finishPack(data, decision, user.id, draft.text, options);
+    return finishPack(clearPrompt(data, user.id), decision, user.id, draft.text, options);
   }
   if (!draft || draft.kind === "text") {
     decision.replies.push({
@@ -301,6 +339,7 @@ function reduceIncoming(
         decision,
       ),
       keyboard: open && open.status !== "naming" ? collectKeyboard : undefined,
+      menu: !(open && open.status !== "naming"),
     });
     return { data, decision };
   }
@@ -362,7 +401,7 @@ function reduceIncoming(
     text: withHint(collectingText(pack.files.length), decision),
     keyboard: collectKeyboard,
   });
-  return { data: upsertPack(data, pack), decision };
+  return { data: clearPrompt(upsertPack(data, pack), user.id), decision };
 }
 
 function askName(data: VaultData, decision: Decision, chatId: string, userId: number) {
@@ -412,7 +451,7 @@ function finishPack(data: VaultData, decision: Decision, userId: number, rawName
       ],
     ],
   });
-  return { data: upsertPack(data, pack), decision };
+  return { data: clearPrompt(upsertPack(data, pack), userId), decision };
 }
 
 function deliverCode(data: VaultData, decision: Decision, chatId: string, userId: number, code: string) {
@@ -442,6 +481,17 @@ function removePack(data: VaultData, decision: Decision, chatId: string, userId:
   decision.removeChannelMessages = channelCopies(pack);
   decision.replies.push({ kind: "send", chatId, text: `已删除「${pack.name}」。` });
   return { data: { ...data, packs: data.packs.filter((entry) => entry.code !== code) }, decision };
+}
+
+function clearPrompt(data: VaultData, userId: number): VaultData {
+  const prompts = (data.prompts ?? []).filter((item) => item.ownerId !== String(userId));
+  if (prompts.length === (data.prompts ?? []).length) return data;
+  return { ...data, prompts };
+}
+
+function askSearch(data: VaultData, userId: number): VaultData {
+  const prompts = (data.prompts ?? []).filter((item) => item.ownerId !== String(userId));
+  return { ...data, prompts: [...prompts, { ownerId: String(userId), kind: "search" }] };
 }
 
 function collectingText(count: number) {

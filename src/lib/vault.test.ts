@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { applyVaultUpdate, deliverItem, type VaultIO } from "./vault/apply";
-import { BotApiError, BotClient, canPostInChannel, explainBot } from "./vault/bot-client";
+import { BotApiError, BotClient, botCommands, canPostInChannel, explainBot } from "./vault/bot-client";
 import {
   commandOf,
   draftFromMessage,
   formatSize,
   maskToken,
+  MENU,
   normalizeChannel,
   retrievalPlan,
 } from "./vault/format";
@@ -229,6 +230,48 @@ test("pages ready packs and searches by the pack name", () => {
   const found = step(data, textMessage(41, 41, "/search 笔记1"), "2026-10-09T00:11:00.000Z", nextCode);
   assert.match(found.decision.replies[0]?.text ?? "", /笔记1/);
   assert.doesNotMatch(found.decision.replies[0]?.text ?? "", /笔记2/);
+});
+
+test("menu offers start, store, packed folders, and keyword search", () => {
+  assert.deepEqual(
+    botCommands.slice(0, 4).map((item) => item.description),
+    [MENU.start, MENU.store, MENU.folders, MENU.search],
+  );
+  const nextCode = codes();
+  const now = "2026-10-09T00:00:00.000Z";
+  const started = step(baseData(), textMessage(1, 1, "开始"), now, nextCode);
+  assert.equal(started.decision.replies[0]?.menu, true);
+  assert.match(started.decision.replies[0]?.text ?? "", /查看文件夹（打包好的）/);
+
+  const stored = step(baseData(), textMessage(2, 2, "存储"), now, nextCode);
+  assert.match(stored.decision.replies[0]?.text ?? "", /结束/);
+  assert.equal(stored.data.packs.length, 0);
+
+  const collecting = step(baseData(), privateFile(3, 3), now, nextCode);
+  const named = finishPack(collecting.data, "周报", now, nextCode, 4);
+  const folders = step(named.data, textMessage(8, 8, "查看文件夹（打包好的）"), now, nextCode);
+  assert.match(folders.decision.replies[0]?.text ?? "", /周报/);
+  assert.equal(folders.data.packs[0]?.status, "ready");
+
+  const asked = step(named.data, textMessage(9, 9, "搜索关键词"), now, nextCode);
+  assert.equal(asked.data.prompts[0]?.kind, "search");
+  assert.match(asked.decision.replies[0]?.text ?? "", /关键词/);
+  const found = step(asked.data, textMessage(10, 10, "周报"), now, nextCode);
+  assert.match(found.decision.replies[0]?.text ?? "", /周报/);
+  assert.equal(found.data.prompts.length, 0);
+  assert.equal(found.data.packs.length, 1);
+});
+
+test("a menu button does not become the folder name", () => {
+  const nextCode = codes();
+  const now = "2026-10-09T00:00:00.000Z";
+  const collecting = step(baseData(), privateFile(1, 10), now, nextCode);
+  const naming = step(collecting.data, press(2, "e"), now, nextCode);
+  assert.equal(naming.data.packs[0]?.status, "naming");
+  const folders = step(naming.data, textMessage(3, 11, "查看文件夹（打包好的）"), now, nextCode);
+  assert.equal(folders.data.packs[0]?.status, "naming");
+  assert.equal(folders.data.packs[0]?.code, undefined);
+  assert.match(folders.decision.replies[0]?.text ?? "", /还没有打包好的文件夹/);
 });
 
 test("cancel drops the open group before it has a code", () => {

@@ -22,8 +22,8 @@ type VaultView = {
 const steps = [
   "在 Telegram 打开 @BotFather，发送 /newbot，按提示起名，复制它发来的令牌。",
   "把令牌贴到下面，点「开始接收」。讯栈会一直在这台机器上收消息。",
-  "打开你的机器人，把文件连续发给它。它可以先收成一组。",
-  "点「结束」，再发一个名称。机器人这时才给出编号和链接，打开就能取回这一整组。",
+  "打开机器人，点菜单里的「存储」，把文件连续发给它。它们先收成一组。",
+  "点「结束」，再发一个名称。这时才给出编号和链接。菜单里还可以查看文件夹、搜索关键词。",
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -229,7 +229,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
             {status?.tokenHint ? <span className="text-xs text-muted-foreground">{status.tokenHint}</span> : null}
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
-            {status ? `已打包 ${status.packCount} 组` : "正在读取…"}
+            {status ? `文件夹 ${status.packCount} 个` : "正在读取…"}
             {status?.channelTitle ? ` · 仓库频道 ${status.channelTitle}` : " · 还没绑定仓库频道"}
             {status?.shareLinks ? " · 编号链接可以转给别人" : " · 只有本人能取回"}
           </p>
@@ -337,23 +337,23 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
 
         <section className="grid gap-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-medium">已打包</h2>
+            <h2 className="text-base font-medium">文件夹</h2>
             <Input
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="搜索名称、编号或发送人"
+              placeholder="搜索关键词、编号或发送人"
               className="h-9 max-w-64"
-              aria-label="搜索已保存的文件"
+              aria-label="搜索文件夹"
             />
           </div>
           {!view ? (
             <p className="text-sm text-muted-foreground">正在读取…</p>
           ) : view.items.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              {query ? "没有匹配的打包。" : "还没有打包。在 Telegram 里把文件发给机器人，点结束并写上名称之后，会出现在这里。"}
+              {query ? "没有匹配的文件夹。" : "还没有打包好的文件夹。在 Telegram 里点「存储」，把文件发给机器人，结束并写上名称之后，会出现在这里。"}
             </p>
           ) : (
             <ul className="divide-y divide-border rounded-lg border border-border bg-card">

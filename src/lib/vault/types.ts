@@ -133,6 +133,11 @@ export type SeenChannel = {
   seenAt: string;
 };
 
+export type UserPrompt = {
+  ownerId: string;
+  kind: "search";
+};
+
 export type VaultData = {
   token: string;
   enabled: boolean;
@@ -145,6 +150,7 @@ export type VaultData = {
   offset: number;
   packs: VaultPack[];
   seenChannels: SeenChannel[];
+  prompts: UserPrompt[];
   lastError?: string;
   connectedAt?: string;
 };
@@ -195,5 +201,6 @@ export function emptyVault(): VaultData {
     offset: 0,
     packs: [],
     seenChannels: [],
+    prompts: [],
   };
 }

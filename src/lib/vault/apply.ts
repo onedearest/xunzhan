@@ -7,7 +7,7 @@ import { CODE_ALPHABET, VAULT_LIMITS, type InlineButton, type TgUpdate, type Vau
 
 export type VaultIO = {
   copyMessage(fromChat: string, messageId: number, toChat: string): Promise<number>;
-  sendMessage(chatId: string, text: string, keyboard?: InlineButton[][]): Promise<void>;
+  sendMessage(chatId: string, text: string, keyboard?: InlineButton[][], menu?: boolean): Promise<void>;
   editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]): Promise<void>;
   answerCallback(id: string, text?: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
@@ -24,7 +24,7 @@ export function randomCode() {
 export function ioFromClient(client: BotClient): VaultIO {
   return {
     copyMessage: (fromChat, messageId, toChat) => client.copyMessage(fromChat, messageId, toChat),
-    sendMessage: (chatId, text, keyboard) => client.sendMessage(chatId, text, keyboard).then(() => undefined),
+    sendMessage: (chatId, text, keyboard, menu) => client.sendMessage(chatId, text, keyboard, menu).then(() => undefined),
     editMessage: (chatId, messageId, text, keyboard) => client.editMessage(chatId, messageId, text, keyboard),
     answerCallback: (id, text) => client.answerCallback(id, text).then(() => undefined),
     deleteMessage: (chatId, messageId) => client.deleteMessage(chatId, messageId).then(() => undefined),
@@ -147,10 +147,10 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
         await io.editMessage(reply.chatId, reply.messageId, reply.text, reply.keyboard);
         continue;
       } catch {
-        await io.sendMessage(reply.chatId, reply.text, reply.keyboard);
+        await io.sendMessage(reply.chatId, reply.text, reply.keyboard, reply.menu);
         continue;
       }
     }
-    await io.sendMessage(reply.chatId, reply.text, reply.keyboard);
+    await io.sendMessage(reply.chatId, reply.text, reply.keyboard, reply.menu);
   }
 }

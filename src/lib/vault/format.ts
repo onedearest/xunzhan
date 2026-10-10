@@ -113,15 +113,56 @@ function fileDraft(kind: VaultKind, name: string, file: { file_id: string; file_
   };
 }
 
+export const MENU = {
+  start: "开始",
+  store: "存储",
+  folders: "查看文件夹（打包好的）",
+  search: "搜索关键词",
+} as const;
+
+export function menuKeyboard() {
+  return [
+    [{ text: MENU.start }, { text: MENU.store }],
+    [{ text: MENU.folders }],
+    [{ text: MENU.search }],
+  ];
+}
+
+export function menuAction(text: string) {
+  const value = text.trim();
+  if (value === MENU.start) return "start" as const;
+  if (value === MENU.store) return "store" as const;
+  if (value === MENU.folders || value === "查看文件夹") return "folders" as const;
+  if (value === MENU.search) return "search" as const;
+  return null;
+}
+
+export function storeText(open?: { status: "collecting" | "naming"; count: number }) {
+  if (open?.status === "naming") {
+    return `这一组有 ${open.count} 个文件。\n\n把名称发过来，我再生成编号和链接。`;
+  }
+  if (open?.status === "collecting") {
+    return `这一组已经有 ${open.count} 个。\n\n还要继续存入，还是结束？结束后再起名称。`;
+  }
+  return ["直接把文件、图片、视频或语音发给我，可以连续发。", "它们先放在同一组里。", "发完点「结束」，再发一个名称。我才会生成编号和链接。"].join("\n");
+}
+
+export function searchAskText() {
+  return "把关键词发过来。我在已经打包的文件夹里按名称找。";
+}
+
 export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean }) {
   const lines = [
-    "把要存的文件发给我，可以连续发很多个。它们会先放在同一组里。",
-    "发完后点「结束」，再发一个名称。我才会生成编号和链接。",
+    "用下面的菜单就行。",
     "",
-    "/list 查看已经打包的",
-    "/search 关键词",
-    "/get 编号",
-    "/del 编号",
+    "开始：看这段说明",
+    "存储：把文件发给我，结束之后再起名称",
+    "查看文件夹（打包好的）：打开已经生成编号的那些",
+    "搜索关键词：按名称找文件夹",
+    "",
+    "/get 编号 取回这一组",
+    "/del 编号 删除这一组",
+    "/cancel 取消还没起名的一组",
     "/stats 查看用量",
   ];
   if (options.shareLinks && options.username) {
@@ -138,7 +179,7 @@ export function welcomeText(options: { username?: string; shareLinks: boolean; c
 
 export function packedText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
   const lines = [
-    "已生成",
+    "文件夹已生成",
     "",
     `名称：${clip(pack.name || "未命名", 80)}`,
     `文件：${pack.files.length} 个`,
@@ -155,25 +196,25 @@ export function packedText(pack: VaultPack, options: { username?: string; shareL
 }
 
 export function listText(packs: VaultPack[], page: number, pages: number, total: number) {
-  if (total === 0) return "还没有打包。直接把文件发给我，结束之后再起名称。";
+  if (total === 0) return "还没有打包好的文件夹。点「存储」，把文件发过来，结束之后再起名称。";
   const lines = packs.map((pack, index) => {
     const number = (page - 1) * VAULT_LIMITS.userPageSize + index + 1;
     return `${number}. ${clip(pack.name || "未命名", 40)} · ${pack.files.length} 个 · ${pack.code}`;
   });
-  return [`你的打包，第 ${page}/${pages} 页，共 ${total} 组`, "", ...lines, "", "点下面的按钮取回或删除。"].join("\n");
+  return [`文件夹，第 ${page}/${pages} 页，共 ${total} 个`, "", ...lines, "", "点下面的按钮取回或删除。"].join("\n");
 }
 
 export function searchText(query: string, packs: VaultPack[], total: number) {
   if (!packs.length) return `没有找到「${clip(query, 40)}」。`;
   const lines = packs.map((pack) => `${clip(pack.name || "未命名", 40)} · ${pack.files.length} 个 · ${pack.code}`);
-  const more = total > packs.length ? ["", `还有 ${total - packs.length} 组，把词写得更具体一些。`] : [];
-  return [`「${clip(query, 40)}」找到 ${total} 组`, "", ...lines, ...more].join("\n");
+  const more = total > packs.length ? ["", `还有 ${total - packs.length} 个，把词写得更具体一些。`] : [];
+  return [`「${clip(query, 40)}」找到 ${total} 个文件夹`, "", ...lines, ...more].join("\n");
 }
 
 export function statsText(packs: VaultPack[], channelTitle?: string) {
   const files = packs.reduce((sum, pack) => sum + pack.files.length, 0);
   return [
-    `已打包 ${packs.length} 组，共 ${files} 个文件`,
+    `文件夹 ${packs.length} 个，共 ${files} 个文件`,
     channelTitle ? `仓库频道：${channelTitle}` : "仓库频道：还没设置。编号仍然可以取回。",
   ].join("\n");
 }

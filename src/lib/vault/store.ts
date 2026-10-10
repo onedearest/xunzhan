@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { emptyVault, type VaultData } from "./types";
+import { emptyVault, type UserPrompt, type VaultData } from "./types";
 
 export type VaultRepository = {
   load(): Promise<VaultData>;
@@ -34,6 +34,7 @@ export function createVaultRepository(dir: string): VaultRepository {
         offset: typeof parsed.offset === "number" ? parsed.offset : 0,
         packs: Array.isArray(parsed.packs) ? parsed.packs : [],
         seenChannels: Array.isArray(parsed.seenChannels) ? parsed.seenChannels : [],
+        prompts: readPrompts(parsed.prompts),
         lastError: parsed.lastError,
         connectedAt: parsed.connectedAt,
       };
@@ -66,6 +67,18 @@ export function createVaultRepository(dir: string): VaultRepository {
       });
     },
   };
+}
+
+function readPrompts(value: unknown): UserPrompt[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const prompt = item as { ownerId?: unknown; kind?: unknown };
+    if (prompt.kind === "search" && typeof prompt.ownerId === "string") {
+      return [{ ownerId: prompt.ownerId, kind: "search" as const }];
+    }
+    return [];
+  });
 }
 
 let cached: { dir: string; repo: VaultRepository } | null = null;
