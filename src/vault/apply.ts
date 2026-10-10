@@ -57,7 +57,11 @@ export async function deliverPack(client: BotClient, chatId: string, pack: Vault
     index += 1;
     if (batch.mode === "single") {
       if (showIndex) await client.sendMessage(chatId, `第 ${index}/${batches.length} 组，1 个`);
-      await deliverItem(client, chatId, batch.file, currentBotId);
+      try {
+        await deliverItem(client, chatId, batch.file, currentBotId);
+      } catch {
+        await client.sendMessage(chatId, `「${batch.file.name}」没发出去。`);
+      }
       continue;
     }
     const label = showIndex ? `第 ${index}/${batches.length} 组，${batch.files.length} 个` : undefined;
@@ -73,7 +77,11 @@ export async function deliverPack(client: BotClient, chatId: string, pack: Vault
     } catch {
       if (label) await client.sendMessage(chatId, label);
       for (const file of batch.files) {
-        await deliverItem(client, chatId, file, currentBotId);
+        try {
+          await deliverItem(client, chatId, file, currentBotId);
+        } catch {
+          await client.sendMessage(chatId, `「${file.name}」没发出去。`);
+        }
       }
     }
   }

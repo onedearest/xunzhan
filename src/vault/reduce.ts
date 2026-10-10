@@ -545,6 +545,7 @@ function reduceIncoming(
     botId: data.botId,
     chatId,
     messageId: message.message_id,
+    mediaGroupId: message.media_group_id,
   };
   const pack = open
     ? { ...open, status: "collecting" as const, files: [...open.files, file] }

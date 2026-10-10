@@ -619,9 +619,10 @@ test("splits a retrieved pack into albums of ten", () => {
     file.fileId = `p${index}`;
   });
   const document = { ...storedFile(30, "99"), kind: "document" as const, fileId: "doc" };
-  const voice = { ...storedFile(31, "99"), kind: "voice" as const, fileId: "voice" };
-  const foreign = { ...storedFile(32, "1"), kind: "photo" as const, fileId: "other" };
-  const batches = deliveryBatches([...photos, document, document, voice, foreign], "99");
+  const document2 = { ...storedFile(31, "99"), kind: "document" as const, fileId: "doc2" };
+  const voice = { ...storedFile(32, "99"), kind: "voice" as const, fileId: "voice" };
+  const foreign = { ...storedFile(33, "1"), kind: "photo" as const, fileId: "other" };
+  const batches = deliveryBatches([...photos, document, document2, voice, foreign], "99");
   assert.equal(batches[0]?.mode, "album");
   assert.equal(batches[0]?.mode === "album" ? batches[0].files.length : 0, 10);
   assert.equal(batches[1]?.mode, "album");
@@ -630,6 +631,33 @@ test("splits a retrieved pack into albums of ten", () => {
   assert.equal(batches[3]?.mode, "single");
   assert.equal(batches[3]?.mode === "single" ? batches[3].file.kind : "", "voice");
   assert.equal(batches[4]?.mode === "single" ? batches[4].file.botId : "", "1");
+});
+
+test("keeps separate albums apart and sends a huge file alone", () => {
+  const album = (group: string, ids: number[]) =>
+    ids.map((messageId) => ({
+      ...storedFile(messageId, "99"),
+      kind: "photo" as const,
+      fileId: `${group}-${messageId}`,
+      mediaGroupId: group,
+      size: 1000,
+      channelId: undefined,
+      channelMessageId: undefined,
+    }));
+  const huge = {
+    ...storedFile(5, "99"),
+    kind: "video" as const,
+    fileId: "big",
+    mediaGroupId: "g1",
+    size: 60 * 1024 * 1024,
+    channelId: undefined,
+    channelMessageId: undefined,
+  };
+  const batches = deliveryBatches([...album("g1", [1, 2, 3, 4]), huge, ...album("g2", [10, 11, 12])], "99");
+  assert.equal(batches.length, 3);
+  assert.equal(batches[0]?.mode === "album" ? batches[0].files.length : 0, 4);
+  assert.equal(batches[1]?.mode === "single" ? batches[1].file.fileId : "", "big");
+  assert.equal(batches[2]?.mode === "album" ? batches[2].files.length : 0, 3);
 });
 
 test("sends retrieval albums of ten and falls back one by one", async () => {

@@ -111,6 +111,7 @@ export type VaultFile = {
   botId?: string;
   chatId: string;
   messageId: number;
+  mediaGroupId?: string;
   channelId?: string;
   channelMessageId?: number;
 };
