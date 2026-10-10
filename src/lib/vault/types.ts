@@ -3,6 +3,7 @@ export const VAULT_LIMITS = {
   maxFilesPerPack: 100,
   maxPacksPerUser: 500,
   userPageSize: 5,
+  filePageSize: 10,
   adminPageSize: 20,
   seenChannels: 8,
   codeLength: 8,
@@ -124,6 +125,8 @@ export type VaultPack = {
   files: VaultFile[];
   createdAt: string;
   readyAt?: string;
+  noticeMessageId?: number;
+  noticePage?: number;
 };
 
 export type SeenChannel = {

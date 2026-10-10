@@ -128,13 +128,42 @@ export function menuKeyboard() {
   ];
 }
 
+export function collectingBar() {
+  return [
+    [{ text: "上一页" }, { text: "下一页" }],
+    [{ text: "结束" }],
+  ];
+}
+
 export function menuAction(text: string) {
   const value = text.trim();
   if (value === MENU.start) return "start" as const;
   if (value === MENU.store) return "store" as const;
   if (value === MENU.folders || value === "查看文件夹") return "folders" as const;
   if (value === MENU.search) return "search" as const;
+  if (value === "结束") return "finish" as const;
+  if (value === "上一页") return "page-prev" as const;
+  if (value === "下一页") return "page-next" as const;
   return null;
+}
+
+export function filePage<T>(items: T[], requested?: number) {
+  const pages = Math.max(1, Math.ceil(items.length / VAULT_LIMITS.filePageSize));
+  const page = Math.min(pages, Math.max(1, requested ?? pages));
+  const start = (page - 1) * VAULT_LIMITS.filePageSize;
+  return { page, pages, start, slice: items.slice(start, start + VAULT_LIMITS.filePageSize) };
+}
+
+export function collectingText(files: { name: string }[], requested?: number) {
+  const shown = filePage(files, requested ?? Math.max(1, Math.ceil(files.length / VAULT_LIMITS.filePageSize)));
+  const lines = [
+    `已收下 ${files.length} 个，先放在同一组里。`,
+    "继续发文件就会存进来。收完点下面的「结束」，再起个名称。",
+    "",
+    ...shown.slice.map((file, index) => `${shown.start + index + 1}. ${clip(file.name, 40)}`),
+  ];
+  if (shown.pages > 1) lines.push("", `第 ${shown.page}/${shown.pages} 页`);
+  return { text: lines.join("\n"), page: shown.page, pages: shown.pages };
 }
 
 export function storeText(open?: { status: "collecting" | "naming"; count: number }) {
@@ -142,7 +171,7 @@ export function storeText(open?: { status: "collecting" | "naming"; count: numbe
     return `这一组有 ${open.count} 个文件。\n\n把名称发过来，我再生成编号和链接。`;
   }
   if (open?.status === "collecting") {
-    return `这一组已经有 ${open.count} 个。\n\n还要继续存入，还是结束？结束后再起名称。`;
+    return `这一组已经有 ${open.count} 个。\n\n继续发文件就会存进来。收完点下面的「结束」，再起个名称。`;
   }
   return ["直接把文件、图片、视频或语音发给我，可以连续发。", "它们先放在同一组里。", "发完点「结束」，再发一个名称。我才会生成编号和链接。"].join("\n");
 }
@@ -220,11 +249,11 @@ export function searchText(query: string, packs: VaultPack[], total: number, vie
   return [`「${clip(query, 40)}」找到 ${total} 个文件包`, "", ...lines, ...more].join("\n");
 }
 
-export function packDetailText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
-  const shown = pack.files.slice(0, 40);
-  const files = shown.map((file, index) => {
+export function packDetailText(pack: VaultPack, options: { username?: string; shareLinks: boolean }, requestedPage = 1) {
+  const shown = filePage(pack.files, requestedPage);
+  const files = shown.slice.map((file, index) => {
     const size = formatSize(file.size);
-    return `${index + 1}. ${clip(file.name, 60)}${size ? ` · ${size}` : ""}`;
+    return `${shown.start + index + 1}. ${clip(file.name, 60)}${size ? ` · ${size}` : ""}`;
   });
   const lines = [
     `「${clip(pack.name || "未命名", 80)}」`,
@@ -232,12 +261,12 @@ export function packDetailText(pack: VaultPack, options: { username?: string; sh
     "",
     ...files,
   ];
-  if (pack.files.length > shown.length) lines.push(`还有 ${pack.files.length - shown.length} 个，取回时会一起发来。`);
+  if (shown.pages > 1) lines.push("", `第 ${shown.page}/${shown.pages} 页`);
   lines.push("", `编号：${pack.code}`);
   if (options.shareLinks && options.username && pack.code) {
     lines.push(`链接：https://t.me/${options.username}?start=${pack.code}`);
   }
-  return lines.join("\n");
+  return { text: lines.join("\n"), page: shown.page, pages: shown.pages };
 }
 
 function filePreview(pack: VaultPack) {

@@ -1,4 +1,4 @@
-import { menuKeyboard } from "./format";
+import { collectingBar, menuKeyboard } from "./format";
 import type { InlineButton, TgChat, TgUpdate, TgUser, VaultFile, VaultKind } from "./types";
 
 const API = "https://api.telegram.org";
@@ -152,16 +152,19 @@ export class BotClient {
     return result.message_id;
   }
 
-  sendMessage(chatId: string, text: string, keyboard?: InlineButton[][], menu?: boolean) {
-    return this.call("sendMessage", {
+  async sendMessage(chatId: string, text: string, keyboard?: InlineButton[][], menu?: boolean, bar?: "finish") {
+    const result = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text: text.slice(0, 4096),
       reply_markup: keyboard
         ? { inline_keyboard: keyboard }
-        : menu
-          ? { keyboard: menuKeyboard(), resize_keyboard: true, is_persistent: true }
-          : undefined,
+        : bar === "finish"
+          ? { keyboard: collectingBar(), resize_keyboard: true, is_persistent: true }
+          : menu
+            ? { keyboard: menuKeyboard(), resize_keyboard: true, is_persistent: true }
+            : undefined,
     });
+    return result.message_id;
   }
 
   async editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]) {

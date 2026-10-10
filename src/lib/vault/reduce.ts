@@ -1,4 +1,5 @@
 import {
+  collectingText,
   commandOf,
   draftFromMessage,
   isVaultCode,
@@ -33,6 +34,8 @@ export type Reply = {
   text: string;
   keyboard?: InlineButton[][];
   menu?: boolean;
+  bar?: "finish";
+  trackOwnerId?: string;
 };
 
 export type Decision = {
@@ -49,13 +52,6 @@ type Options = {
   now: string;
   nextCode: () => string;
 };
-
-const collectKeyboard: InlineButton[][] = [
-  [
-    { text: "继续存入", callback_data: "c" },
-    { text: "结束", callback_data: "e" },
-  ],
-];
 
 export function reduceVault(data: VaultData, update: TgUpdate, options: Options): { data: VaultData; decision: Decision } {
   const decision: Decision = { replies: [] };
@@ -111,7 +107,9 @@ function reduceCallback(
     decision.replies.push({
       kind: "send",
       chatId,
-      text: open ? "继续把文件发给我。发完再点「结束」。" : "还没有待打包的文件。直接把文件发给我。",
+      bar: open ? "finish" : undefined,
+      menu: !open,
+      text: open ? "继续把文件发过来就会存进来。收完点下面的「结束」。" : "还没有待打包的文件。直接把文件发给我。",
     });
     return { data, decision };
   }
@@ -170,13 +168,14 @@ function reduceCallback(
       decision.callbackText = "这个文件包只有打包的人能看";
       return { data, decision };
     }
+    const detail = packDetailText(pack, { username: data.botUsername, shareLinks: data.shareLinks }, action.page);
     decision.callbackText = "这是里面的文件";
     decision.replies.push({
       kind: messageId ? "edit" : "send",
       chatId,
       messageId,
-      text: packDetailText(pack, { username: data.botUsername, shareLinks: data.shareLinks }),
-      keyboard: detailKeyboard(pack, String(query.from.id)),
+      text: detail.text,
+      keyboard: detailKeyboard(pack, String(query.from.id), detail.page, detail.pages),
     });
     return { data, decision };
   }
@@ -246,10 +245,17 @@ function reduceCommand(
       kind: "send",
       chatId,
       menu: !collecting && !naming,
+      bar: collecting ? "finish" : undefined,
       text: storeText(open ? { status: naming ? "naming" : "collecting", count: open.files.length } : undefined),
-      keyboard: collecting ? collectKeyboard : naming ? [[{ text: "取消这组", callback_data: "z" }]] : undefined,
+      keyboard: naming ? [[{ text: "取消这组", callback_data: "z" }]] : undefined,
     });
     return { data, decision };
+  }
+  if (command.name === "finish") {
+    return askName(data, decision, chatId, user.id);
+  }
+  if (command.name === "page-prev" || command.name === "page-next") {
+    return turnCollectingPage(data, decision, chatId, user.id, command.name === "page-next" ? 1 : -1);
   }
   if (command.name === "cancel") {
     const open = openPack(data, user.id);
@@ -353,8 +359,8 @@ function reduceIncoming(
             : "把文件、图片、视频或语音发给我。可以连续发，结束之后再起名称。",
         decision,
       ),
-      keyboard: open && open.status !== "naming" ? collectKeyboard : undefined,
       menu: !(open && open.status !== "naming"),
+      bar: open && open.status !== "naming" ? "finish" : undefined,
     });
     return { data, decision };
   }
@@ -362,8 +368,8 @@ function reduceIncoming(
     decision.replies.push({
       kind: "send",
       chatId,
-      text: open ? collectingText(open.files.length) : "这份已经收过了。",
-      keyboard: open ? collectKeyboard : undefined,
+      bar: open ? "finish" : undefined,
+      text: open ? "这份已经收过了。继续发新的文件就会存进来。" : "这份已经收过了。",
     });
     return { data, decision };
   }
@@ -380,8 +386,8 @@ function reduceIncoming(
     decision.replies.push({
       kind: "send",
       chatId,
-      text: `这一组已经有 ${open.files.length} 个了。点「结束」，再起个名称。`,
-      keyboard: collectKeyboard,
+      bar: "finish",
+      text: `这一组已经有 ${open.files.length} 个了。点下面的「结束」，再起个名称。`,
     });
     return { data, decision };
   }
@@ -410,20 +416,17 @@ function reduceIncoming(
   if (data.channelId) {
     decision.copy = { fromChat: chatId, messageId: message.message_id, toChat: data.channelId };
   }
-  decision.replies.push({
-    kind: "send",
-    chatId,
-    text: withHint(collectingText(pack.files.length), decision),
-    keyboard: collectKeyboard,
-  });
-  return { data: clearPrompt(upsertPack(data, pack), user.id), decision };
+  const shown = collectingText(pack.files);
+  const hinted = withHint(shown.text, decision);
+  decision.replies.push(collectingReply({ ...pack, noticePage: shown.page }, chatId, hinted));
+  return { data: clearPrompt(upsertPack(data, { ...pack, noticePage: shown.page }), user.id), decision };
 }
 
 function askName(data: VaultData, decision: Decision, chatId: string, userId: number) {
   const open = openPack(data, userId);
   if (!open || open.files.length === 0) {
     decision.callbackText = "还没有文件";
-    decision.replies.push({ kind: "send", chatId, text: "还没有文件。先把要存的文件发给我。" });
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "还没有文件。先把要存的文件发给我。" });
     return { data, decision };
   }
   const pack: VaultPack = { ...open, status: "naming" };
@@ -431,8 +434,8 @@ function askName(data: VaultData, decision: Decision, chatId: string, userId: nu
   decision.replies.push({
     kind: "send",
     chatId,
-    text: `这一组有 ${pack.files.length} 个文件。\n\n把名称发过来，我再生成编号和链接。`,
-    keyboard: [[{ text: "取消这组", callback_data: "z" }]],
+    menu: true,
+    text: `这一组有 ${pack.files.length} 个文件。\n\n把名称发过来，我再生成编号和链接。不想要了就发 /cancel。`,
   });
   return { data: upsertPack(data, pack), decision };
 }
@@ -509,8 +512,39 @@ function askSearch(data: VaultData, userId: number): VaultData {
   return { ...data, prompts: [...prompts, { ownerId: String(userId), kind: "search" }] };
 }
 
-function collectingText(count: number) {
-  return `已收下 ${count} 个，先放在同一组里。\n\n还要继续存入，还是结束？`;
+function collectingReply(pack: VaultPack, chatId: string, text: string): Reply {
+  if (pack.noticeMessageId) {
+    return { kind: "edit", chatId, messageId: pack.noticeMessageId, text };
+  }
+  return { kind: "send", chatId, text, bar: "finish", trackOwnerId: pack.ownerId };
+}
+
+function turnCollectingPage(data: VaultData, decision: Decision, chatId: string, userId: number, delta: number) {
+  const open = openPack(data, userId);
+  if (!open || open.status === "naming") {
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: !open,
+      bar: open ? "finish" : undefined,
+      text: open ? "先把名称发过来。翻页要等这组还在存文件的时候。" : "还没有正在存的文件。直接发过来就会存入。",
+    });
+    return { data, decision };
+  }
+  const current = open.noticePage ?? Math.max(1, Math.ceil(open.files.length / VAULT_LIMITS.filePageSize));
+  const shown = collectingText(open.files, current + delta);
+  if (shown.page === current) {
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      bar: "finish",
+      text: delta < 0 ? "已经是第一页。" : "已经是最后一页。",
+    });
+    return { data, decision };
+  }
+  const pack = { ...open, noticePage: shown.page };
+  decision.replies.push(collectingReply(pack, chatId, shown.text));
+  return { data: upsertPack(data, pack), decision };
 }
 
 function packKeyboard(packs: VaultPack[], page: number, pages: number, viewerId: string) {
@@ -531,10 +565,16 @@ function packKeyboard(packs: VaultPack[], page: number, pages: number, viewerId:
   return rows;
 }
 
-function detailKeyboard(pack: VaultPack, viewerId: string) {
+function detailKeyboard(pack: VaultPack, viewerId: string, page: number, pages: number) {
   const row: InlineButton[] = [{ text: "取回这一组", callback_data: `g:${pack.code}` }];
   if (pack.ownerId === viewerId) row.push({ text: "删除", callback_data: `d:${pack.code}` });
-  return [row, [{ text: "返回文件夹", callback_data: "l:1" }]];
+  const rows = [row];
+  const nav: InlineButton[] = [];
+  if (page > 1) nav.push({ text: "上一页", callback_data: `v:${pack.code}:${page - 1}` });
+  if (page < pages) nav.push({ text: "下一页", callback_data: `v:${pack.code}:${page + 1}` });
+  if (nav.length) rows.push(nav);
+  rows.push([{ text: "返回文件夹", callback_data: "l:1" }]);
+  return rows;
 }
 
 function clipName(name?: string) {
@@ -551,8 +591,8 @@ function parseAction(data: string) {
   if (list) return { type: "list" as const, page: Number(list[1]) };
   const get = /^g:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
   if (get) return { type: "get" as const, code: get[1] };
-  const view = /^v:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
-  if (view) return { type: "view" as const, code: view[1] };
+  const view = /^v:([abcdefghjkmnpqrstuvwxyz23456789]{8})(?::(\d{1,4}))?$/.exec(data);
+  if (view) return { type: "view" as const, code: view[1], page: view[2] ? Number(view[2]) : 1 };
   const ask = /^d:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
   if (ask) return { type: "ask-delete" as const, code: ask[1] };
   const yes = /^y:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);

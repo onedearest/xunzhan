@@ -133,14 +133,22 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(first.data.packs[0]?.status, "collecting");
   assert.equal(first.data.packs[0]?.code, undefined);
   assert.match(first.decision.replies[0]?.text ?? "", /已收下 1 个/);
-  assert.equal(first.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "c");
-  assert.equal(first.decision.replies[0]?.keyboard?.[0]?.[1]?.callback_data, "e");
+  assert.match(first.decision.replies[0]?.text ?? "", /报告\.pdf/);
+  assert.equal(first.decision.replies[0]?.bar, "finish");
+  assert.equal(first.decision.replies[0]?.kind, "send");
 
-  const second = step(first.data, privateFile(2, 11, "封面.png"), now, nextCode);
+  const noted = {
+    ...first.data,
+    packs: [{ ...first.data.packs[0]!, noticeMessageId: 77, noticePage: 1 }],
+  };
+  const second = step(noted, privateFile(2, 11, "封面.png"), now, nextCode);
   assert.equal(second.data.packs.length, 1);
   assert.equal(second.data.packs[0]?.files.length, 2);
   assert.equal(second.data.packs[0]?.status, "collecting");
+  assert.equal(second.decision.replies[0]?.kind, "edit");
+  assert.equal(second.decision.replies[0]?.messageId, 77);
   assert.match(second.decision.replies[0]?.text ?? "", /已收下 2 个/);
+  assert.match(second.decision.replies[0]?.text ?? "", /封面\.png/);
 
   const talking = step(second.data, textMessage(3, 12, "先别起名"), now, nextCode);
   assert.equal(talking.data.packs[0]?.status, "collecting");
@@ -169,12 +177,64 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(named.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "g:abcdefgj");
 });
 
+test("pages stored files by tens and finishes from the bottom button", () => {
+  const now = "2026-10-09T00:00:00.000Z";
+  const nextCode = codes();
+  const files = Array.from({ length: 10 }, (_, index) => ({
+    kind: "document" as const,
+    name: `素材${index + 1}.pdf`,
+    chatId: "7",
+    messageId: index + 1,
+  }));
+  const data = baseData({
+    packs: [
+      {
+        id: "draft:7",
+        status: "collecting",
+        ownerId: "7",
+        ownerName: "林夏",
+        files,
+        createdAt: now,
+        noticeMessageId: 50,
+        noticePage: 1,
+      },
+    ],
+  });
+  const added = step(data, privateFile(11, 11, "素材11.pdf"), now, nextCode);
+  assert.equal(added.decision.replies[0]?.kind, "edit");
+  assert.match(added.decision.replies[0]?.text ?? "", /第 2\/2 页/);
+  assert.match(added.decision.replies[0]?.text ?? "", /11\. 素材11\.pdf/);
+  assert.doesNotMatch(added.decision.replies[0]?.text ?? "", /素材1\.pdf/);
+  const back = step(added.data, textMessage(12, 12, "上一页"), now, nextCode);
+  assert.match(back.decision.replies[0]?.text ?? "", /1\. 素材1\.pdf/);
+  assert.doesNotMatch(back.decision.replies[0]?.text ?? "", /素材11\.pdf/);
+  const ended = step(added.data, textMessage(13, 13, "结束"), now, nextCode);
+  assert.equal(ended.data.packs[0]?.status, "naming");
+  assert.equal(ended.decision.replies[0]?.menu, true);
+  assert.match(ended.decision.replies[0]?.text ?? "", /把名称发过来/);
+
+  const ready = {
+    ...added.data.packs[0]!,
+    id: "abcdefgj",
+    code: "abcdefgj",
+    status: "ready" as const,
+    name: "素材包",
+  };
+  const viewed = step(baseData({ packs: [ready] }), press(14, "v:abcdefgj:2"), now, nextCode);
+  assert.match(viewed.decision.replies[0]?.text ?? "", /第 2\/2 页/);
+  assert.match(viewed.decision.replies[0]?.text ?? "", /11\. 素材11\.pdf/);
+  assert.equal(
+    viewed.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "v:abcdefgj:1"),
+    true,
+  );
+});
+
 test("does not store the same message twice", () => {
   const nextCode = codes();
   const first = step(baseData(), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode);
   const second = step(first.data, privateFile(2, 10), "2026-10-09T00:01:00.000Z", nextCode);
   assert.equal(second.data.packs[0]?.files.length, 1);
-  assert.match(second.decision.replies[0]?.text ?? "", /已收下 1 个/);
+  assert.match(second.decision.replies[0]?.text ?? "", /已经收过了/);
 });
 
 test("keeps each person's packs private when sharing is off", () => {
