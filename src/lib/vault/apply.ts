@@ -1,13 +1,20 @@
 import { randomBytes } from "node:crypto";
 import { explainBot, type BotClient } from "./bot-client";
 import { retrievalPlan } from "./format";
-import { reduceVault, type Decision } from "./reduce";
+import { reduceVault, type Decision, type Reply } from "./reduce";
 import type { VaultRepository } from "./store";
 import { CODE_ALPHABET, VAULT_LIMITS, type InlineButton, type TgUpdate, type VaultFile, type VaultPack } from "./types";
 
 export type VaultIO = {
   copyMessage(fromChat: string, messageId: number, toChat: string): Promise<number>;
-  sendMessage(chatId: string, text: string, keyboard?: InlineButton[][], menu?: boolean, bar?: "finish"): Promise<number | void>;
+  sendMessage(
+    chatId: string,
+    text: string,
+    keyboard?: InlineButton[][],
+    menu?: boolean,
+    bar?: "finish",
+    replyTo?: { messageId?: number; threadId?: number },
+  ): Promise<number | void>;
   editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]): Promise<void>;
   answerCallback(id: string, text?: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
@@ -24,7 +31,8 @@ export function randomCode() {
 export function ioFromClient(client: BotClient): VaultIO {
   return {
     copyMessage: (fromChat, messageId, toChat) => client.copyMessage(fromChat, messageId, toChat),
-    sendMessage: (chatId, text, keyboard, menu, bar) => client.sendMessage(chatId, text, keyboard, menu, bar),
+    sendMessage: (chatId, text, keyboard, menu, bar, replyTo) =>
+      client.sendMessage(chatId, text, keyboard, menu, bar, replyTo),
     editMessage: (chatId, messageId, text, keyboard) => client.editMessage(chatId, messageId, text, keyboard),
     answerCallback: (id, text) => client.answerCallback(id, text).then(() => undefined),
     deleteMessage: (chatId, messageId) => client.deleteMessage(chatId, messageId).then(() => undefined),
@@ -105,6 +113,13 @@ export async function applyVaultUpdate(
   }
 }
 
+function sendReply(io: VaultIO, reply: Reply) {
+  return io.sendMessage(reply.chatId, reply.text, reply.keyboard, reply.menu, reply.bar, {
+    messageId: reply.replyToMessageId,
+    threadId: reply.messageThreadId,
+  });
+}
+
 async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
   if (decision.copy) {
     try {
@@ -148,10 +163,28 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
         await io.editMessage(reply.chatId, reply.messageId, reply.text, reply.keyboard);
         continue;
       } catch {
-        sent = await io.sendMessage(reply.chatId, reply.text, reply.keyboard, reply.menu, reply.bar);
+        sent = await sendReply(io, reply);
       }
     } else {
-      sent = await io.sendMessage(reply.chatId, reply.text, reply.keyboard, reply.menu, reply.bar);
+      sent = await sendReply(io, reply);
+    }
+    if (reply.deleteAfterMs && typeof sent === "number") {
+      const chatId = reply.chatId;
+      const messageId = sent;
+      const deleteAt = new Date(Date.now() + reply.deleteAfterMs).toISOString();
+      await repo.update((current) => ({
+        ...current,
+        expiring: [...(current.expiring ?? []), { chatId, messageId, deleteAt }].slice(-100),
+      }));
+      setTimeout(() => {
+        void io.deleteMessage(chatId, messageId).catch(() => undefined);
+        void repo
+          .update((current) => ({
+            ...current,
+            expiring: (current.expiring ?? []).filter((item) => !(item.chatId === chatId && item.messageId === messageId)),
+          }))
+          .catch(() => undefined);
+      }, reply.deleteAfterMs);
     }
     if (reply.trackOwnerId && typeof sent === "number") {
       const ownerId = reply.trackOwnerId;

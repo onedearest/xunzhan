@@ -152,10 +152,21 @@ export class BotClient {
     return result.message_id;
   }
 
-  async sendMessage(chatId: string, text: string, keyboard?: InlineButton[][], menu?: boolean, bar?: "finish") {
+  async sendMessage(
+    chatId: string,
+    text: string,
+    keyboard?: InlineButton[][],
+    menu?: boolean,
+    bar?: "finish",
+    replyTo?: { messageId?: number; threadId?: number },
+  ) {
     const result = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text: text.slice(0, 4096),
+      message_thread_id: replyTo?.threadId,
+      reply_parameters: replyTo?.messageId
+        ? { message_id: replyTo.messageId, allow_sending_without_reply: true }
+        : undefined,
       reply_markup: keyboard
         ? { inline_keyboard: keyboard }
         : bar === "finish"

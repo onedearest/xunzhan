@@ -1,4 +1,5 @@
 import {
+  codesInText,
   collectingText,
   commandOf,
   draftFromMessage,
@@ -36,6 +37,9 @@ export type Reply = {
   menu?: boolean;
   bar?: "finish";
   trackOwnerId?: string;
+  replyToMessageId?: number;
+  messageThreadId?: number;
+  deleteAfterMs?: number;
 };
 
 export type Decision = {
@@ -71,21 +75,49 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
     decision.channelHint = `这个频道的编号是 ${forwarded.id}。可以在网页里把它设成仓库。`;
   }
   if (message.chat.type !== "private") {
-    const command = commandOf(message.text);
-    if (command && ["start", "help", "store", "folders", "list", "search"].includes(command.name)) {
-      decision.replies.push({
-        kind: "send",
-        chatId: String(message.chat.id),
-        text: "这些功能请私聊我。点「存储」把文件发过来，结束之后再起名称。",
-      });
-    }
-    return { data: next, decision };
+    return reduceGroup(next, message, decision);
   }
   const command = commandOf(message.text);
   if (command) return reduceCommand(clearPrompt(next, message.from.id), message, command, decision);
   const action = message.text ? menuAction(message.text) : null;
   if (action) return reduceCommand(clearPrompt(next, message.from.id), message, { name: action, arg: "" }, decision);
   return reduceIncoming(next, message, decision, options);
+}
+
+function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
+  const command = commandOf(message.text);
+  if (command && ["start", "help", "store", "folders", "list", "search"].includes(command.name)) {
+    decision.replies.push({
+      kind: "send",
+      chatId: String(message.chat.id),
+      replyToMessageId: message.message_id,
+      messageThreadId: message.message_thread_id,
+      text: "这些功能请私聊我。点「存储」把文件发过来，结束之后再起名称。",
+    });
+  }
+  if (!data.shareLinks || !data.botUsername) return { data, decision };
+  const packs = codesInText([message.text, message.caption].filter(Boolean).join("\n"))
+    .slice(0, 3)
+    .flatMap((code) => {
+      const pack = readyPacks(data).find((entry) => entry.code === code);
+      return pack?.code ? [pack] : [];
+    });
+  if (!packs.length) return { data, decision };
+  decision.replies.push({
+    kind: "send",
+    chatId: String(message.chat.id),
+    replyToMessageId: message.message_id,
+    messageThreadId: message.message_thread_id,
+    deleteAfterMs: 60_000,
+    text: packs.map((pack) => `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件`).join("\n"),
+    keyboard: packs.map((pack) => [
+      {
+        text: `打开「${clipName(pack.name)}」`,
+        url: `https://t.me/${data.botUsername}?start=${pack.code}`,
+      },
+    ]),
+  });
+  return { data, decision };
 }
 
 function reduceCallback(

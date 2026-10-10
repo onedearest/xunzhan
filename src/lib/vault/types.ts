@@ -24,7 +24,8 @@ export type VaultKind =
 
 export type InlineButton = {
   text: string;
-  callback_data: string;
+  callback_data?: string;
+  url?: string;
 };
 
 export type TgUser = {
@@ -74,6 +75,8 @@ export type TgMessage = {
     message_id?: number;
   };
   forward_from_chat?: TgChat;
+  message_thread_id?: number;
+  reply_to_message?: { message_id: number };
 };
 
 export type TgCallback = {
@@ -141,6 +144,12 @@ export type UserPrompt = {
   kind: "search";
 };
 
+export type ExpiringNotice = {
+  chatId: string;
+  messageId: number;
+  deleteAt: string;
+};
+
 export type VaultData = {
   token: string;
   enabled: boolean;
@@ -154,6 +163,7 @@ export type VaultData = {
   packs: VaultPack[];
   seenChannels: SeenChannel[];
   prompts: UserPrompt[];
+  expiring: ExpiringNotice[];
   lastError?: string;
   connectedAt?: string;
 };
@@ -205,5 +215,6 @@ export function emptyVault(): VaultData {
     packs: [],
     seenChannels: [],
     prompts: [],
+    expiring: [],
   };
 }

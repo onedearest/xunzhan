@@ -229,6 +229,63 @@ test("pages stored files by tens and finishes from the bottom button", () => {
   );
 });
 
+test("replies to a code in a group with a button and marks it for deletion", () => {
+  const nextCode = codes();
+  const now = "2026-10-09T00:00:00.000Z";
+  const saved = finishPack(step(baseData(), privateFile(1, 10), now, nextCode).data, "周报", now, nextCode);
+  const group = step(
+    saved.data,
+    update({
+      update_id: 30,
+      message: {
+        message_id: 80,
+        message_thread_id: 4,
+        chat: { id: -1009, type: "supergroup", title: "讨论" },
+        from: { id: 8, first_name: "周衡" },
+        text: "编号 abcdefgj 看看",
+      },
+    }),
+    now,
+    nextCode,
+  );
+  const reply = group.decision.replies[0];
+  assert.equal(reply?.replyToMessageId, 80);
+  assert.equal(reply?.messageThreadId, 4);
+  assert.equal(reply?.deleteAfterMs, 60_000);
+  assert.match(reply?.text ?? "", /周报/);
+  assert.equal(reply?.keyboard?.[0]?.[0]?.url, "https://t.me/storebot?start=abcdefgj");
+  const hidden = step(
+    { ...saved.data, shareLinks: false },
+    update({
+      update_id: 31,
+      message: {
+        message_id: 81,
+        chat: { id: -1009, type: "supergroup" },
+        from: { id: 8, first_name: "周衡" },
+        text: "abcdefgj",
+      },
+    }),
+    now,
+    nextCode,
+  );
+  assert.equal(hidden.decision.replies.length, 0);
+  const missing = step(
+    saved.data,
+    update({
+      update_id: 32,
+      message: {
+        message_id: 82,
+        chat: { id: -1009, type: "group" },
+        from: { id: 8, first_name: "周衡" },
+        text: "abcdefgh",
+      },
+    }),
+    now,
+    nextCode,
+  );
+  assert.equal(missing.decision.replies.length, 0);
+});
+
 test("does not store the same message twice", () => {
   const nextCode = codes();
   const first = step(baseData(), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode);

@@ -272,6 +272,7 @@ async function poll(
         announced = true;
         await client.setCommands().catch(() => undefined);
       }
+      await sweepExpiring(repo, client);
       const updates = await client.getUpdates(data.offset, controller.signal);
       if (runtime().generation !== generation) return;
       failures = 0;
@@ -296,6 +297,21 @@ async function poll(
       await sleep(Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)), controller.signal);
     }
   }
+}
+
+async function sweepExpiring(repo: VaultRepository, client: BotClient) {
+  const data = await repo.load();
+  const now = Date.now();
+  const due = (data.expiring ?? []).filter((item) => Date.parse(item.deleteAt) <= now);
+  if (!due.length) return;
+  for (const item of due) {
+    await client.deleteMessage(item.chatId, item.messageId).catch(() => undefined);
+  }
+  const dueKeys = new Set(due.map((item) => `${item.chatId}:${item.messageId}`));
+  await repo.update((current) => ({
+    ...current,
+    expiring: (current.expiring ?? []).filter((item) => !dueKeys.has(`${item.chatId}:${item.messageId}`)),
+  }));
 }
 
 function sleep(ms: number, signal: AbortSignal) {

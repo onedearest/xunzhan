@@ -18,6 +18,16 @@ export function isVaultCode(value: string) {
   return CODE_PATTERN.test(value);
 }
 
+export function codesInText(text: string) {
+  const found: string[] = [];
+  for (const token of text.match(/[A-Za-z0-9]{8}/g) ?? []) {
+    const code = token.toLowerCase();
+    if (!isVaultCode(code) || found.includes(code)) continue;
+    found.push(code);
+  }
+  return found;
+}
+
 export function maskToken(token: string) {
   const [id, secret] = token.split(":");
   if (!id || !secret) return "";

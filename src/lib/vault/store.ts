@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { emptyVault, type UserPrompt, type VaultData } from "./types";
+import { emptyVault, type ExpiringNotice, type UserPrompt, type VaultData } from "./types";
 
 export type VaultRepository = {
   load(): Promise<VaultData>;
@@ -35,6 +35,7 @@ export function createVaultRepository(dir: string): VaultRepository {
         packs: Array.isArray(parsed.packs) ? parsed.packs : [],
         seenChannels: Array.isArray(parsed.seenChannels) ? parsed.seenChannels : [],
         prompts: readPrompts(parsed.prompts),
+        expiring: readExpiring(parsed.expiring),
         lastError: parsed.lastError,
         connectedAt: parsed.connectedAt,
       };
@@ -67,6 +68,18 @@ export function createVaultRepository(dir: string): VaultRepository {
       });
     },
   };
+}
+
+function readExpiring(value: unknown): ExpiringNotice[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const notice = item as { chatId?: unknown; messageId?: unknown; deleteAt?: unknown };
+    if (typeof notice.chatId !== "string" || typeof notice.messageId !== "number" || typeof notice.deleteAt !== "string") {
+      return [];
+    }
+    return [{ chatId: notice.chatId, messageId: notice.messageId, deleteAt: notice.deleteAt }];
+  });
 }
 
 function readPrompts(value: unknown): UserPrompt[] {
