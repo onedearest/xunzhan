@@ -1,0 +1,18 @@
+{
+  "name": "storage-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Telegram bot that stores files and hands back a code.",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "tsx --test src/vault.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  }
+}
