@@ -19,6 +19,7 @@ export type VaultIO = {
   answerCallback(id: string, text?: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
   deliver(chatId: string, pack: VaultPack, currentBotId?: string): Promise<void>;
+  flashBar?(chatId: string, bar: "finish"): Promise<void>;
 };
 
 export function randomCode() {
@@ -37,6 +38,7 @@ export function ioFromClient(client: BotClient): VaultIO {
     answerCallback: (id, text) => client.answerCallback(id, text).then(() => undefined),
     deleteMessage: (chatId, messageId) => client.deleteMessage(chatId, messageId).then(() => undefined),
     deliver: (chatId, pack, currentBotId) => deliverPack(client, chatId, pack, currentBotId),
+    flashBar: (chatId, bar) => client.flashReplyBar(chatId, bar),
   };
 }
 
@@ -198,6 +200,7 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
         await io.editMessage(reply.chatId, reply.messageId, reply.text, reply.keyboard);
         continue;
       } catch {
+        await io.deleteMessage(reply.chatId, reply.messageId).catch(() => undefined);
         sent = await sendReply(io, reply);
       }
     } else {
@@ -231,5 +234,6 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
         ),
       }));
     }
+    if (reply.armBar) await io.flashBar?.(reply.chatId, reply.armBar);
   }
 }

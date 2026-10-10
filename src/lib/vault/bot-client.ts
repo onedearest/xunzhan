@@ -178,6 +178,19 @@ export class BotClient {
     return result.message_id;
   }
 
+  async flashReplyBar(chatId: string, bar: "finish" | "menu") {
+    const sent = await this.call<{ message_id: number }>("sendMessage", {
+      chat_id: chatId,
+      text: "·",
+      disable_notification: true,
+      reply_markup:
+        bar === "finish"
+          ? { keyboard: collectingBar(), resize_keyboard: true, is_persistent: true }
+          : { keyboard: menuKeyboard(), resize_keyboard: true, is_persistent: true },
+    });
+    await this.deleteMessage(chatId, sent.message_id).catch(() => undefined);
+  }
+
   async editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]) {
     try {
       await this.call("editMessageText", {

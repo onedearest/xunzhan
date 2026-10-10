@@ -36,6 +36,7 @@ export type Reply = {
   keyboard?: InlineButton[][];
   menu?: boolean;
   bar?: "finish";
+  armBar?: "finish";
   trackOwnerId?: string;
   replyToMessageId?: number;
   messageThreadId?: number;
@@ -546,9 +547,9 @@ function askSearch(data: VaultData, userId: number): VaultData {
 
 function collectingReply(pack: VaultPack, chatId: string, text: string): Reply {
   if (pack.noticeMessageId) {
-    return { kind: "edit", chatId, messageId: pack.noticeMessageId, text };
+    return { kind: "edit", chatId, messageId: pack.noticeMessageId, text, trackOwnerId: pack.ownerId };
   }
-  return { kind: "send", chatId, text, bar: "finish", trackOwnerId: pack.ownerId };
+  return { kind: "send", chatId, text, armBar: "finish", trackOwnerId: pack.ownerId };
 }
 
 function turnCollectingPage(data: VaultData, decision: Decision, chatId: string, userId: number, delta: number) {

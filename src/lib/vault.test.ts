@@ -135,7 +135,8 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(first.data.packs[0]?.code, undefined);
   assert.match(first.decision.replies[0]?.text ?? "", /已收下 1 个/);
   assert.match(first.decision.replies[0]?.text ?? "", /报告\.pdf/);
-  assert.equal(first.decision.replies[0]?.bar, "finish");
+  assert.equal(first.decision.replies[0]?.bar, undefined);
+  assert.equal(first.decision.replies[0]?.armBar, "finish");
   assert.equal(first.decision.replies[0]?.kind, "send");
 
   const noted = {
@@ -176,6 +177,56 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.match(named.decision.replies[0]?.text ?? "", /已生成/);
   assert.match(named.decision.replies[0]?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
   assert.equal(named.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "g:abcdefgj");
+});
+
+test("keeps one collecting notice when more files arrive", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "vault-"));
+  try {
+    const repo = createVaultRepository(dir);
+    await repo.update(() => baseData());
+    const sent: string[] = [];
+    const edits: string[] = [];
+    const deleted: number[] = [];
+    let nextId = 10;
+    const io: VaultIO = {
+      async copyMessage() {
+        return 1;
+      },
+      async sendMessage(_chatId, text, _keyboard, _menu, bar) {
+        sent.push(`${bar ?? "-"}:${text}`);
+        return nextId++;
+      },
+      async editMessage(_chatId, _messageId, text) {
+        edits.push(text);
+      },
+      async answerCallback() {
+        return undefined;
+      },
+      async deleteMessage(_chatId, messageId) {
+        deleted.push(messageId);
+      },
+      async deliver() {
+        return undefined;
+      },
+      async flashBar(chatId, bar) {
+        const carrier = await io.sendMessage(chatId, "·", undefined, false, bar);
+        if (typeof carrier === "number") await io.deleteMessage(chatId, carrier);
+      },
+    };
+    const now = "2026-10-09T00:00:00.000Z";
+    await applyVaultUpdate(privateFile(1, 10, "a.pdf"), repo, io, { now, nextCode: codes() });
+    await applyVaultUpdate(privateFile(2, 11, "b.pdf"), repo, io, { now, nextCode: codes() });
+    const saved = await repo.load();
+    assert.equal(saved.packs[0]?.noticeMessageId, 10);
+    assert.match(edits[0] ?? "", /已收下 2 个/);
+    assert.equal(edits.length, 1);
+    assert.match(sent[0] ?? "", /^-:已收下 1 个/);
+    assert.equal(sent[1], "finish:·");
+    assert.equal(sent.length, 2);
+    assert.deepEqual(deleted, [11]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("pages stored files by tens and finishes from the bottom button", () => {
