@@ -23,13 +23,19 @@ export function createVaultRepository(dir: string): VaultRepository {
       const parsed = JSON.parse(raw) as Partial<VaultData>;
       return {
         ...emptyVault(),
-        ...parsed,
-        items: Array.isArray(parsed.items) ? parsed.items : [],
-        seenChannels: Array.isArray(parsed.seenChannels) ? parsed.seenChannels : [],
-        shareLinks: parsed.shareLinks !== false,
-        offset: typeof parsed.offset === "number" ? parsed.offset : 0,
         token: typeof parsed.token === "string" ? parsed.token : "",
         enabled: Boolean(parsed.enabled),
+        botId: parsed.botId,
+        botName: parsed.botName,
+        botUsername: parsed.botUsername,
+        channelId: parsed.channelId,
+        channelTitle: parsed.channelTitle,
+        shareLinks: parsed.shareLinks !== false,
+        offset: typeof parsed.offset === "number" ? parsed.offset : 0,
+        packs: Array.isArray(parsed.packs) ? parsed.packs : [],
+        seenChannels: Array.isArray(parsed.seenChannels) ? parsed.seenChannels : [],
+        lastError: parsed.lastError,
+        connectedAt: parsed.connectedAt,
       };
     } catch {
       return emptyVault();

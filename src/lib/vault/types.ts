@@ -1,6 +1,7 @@
 export const VAULT_LIMITS = {
-  maxItems: 8000,
-  maxPerUser: 2000,
+  maxFiles: 8000,
+  maxFilesPerPack: 100,
+  maxPacksPerUser: 500,
   userPageSize: 5,
   adminPageSize: 20,
   seenChannels: 8,
@@ -95,12 +96,7 @@ export type TgUpdate = {
   my_chat_member?: TgChatMemberUpdate;
 };
 
-export type VaultItem = {
-  code: string;
-  ownerId: string;
-  ownerName: string;
-  ownerUsername?: string;
-  botId?: string;
+export type VaultFile = {
   kind: VaultKind;
   name: string;
   caption?: string;
@@ -108,11 +104,26 @@ export type VaultItem = {
   mime?: string;
   size?: number;
   fileId?: string;
+  botId?: string;
   chatId: string;
   messageId: number;
   channelId?: string;
   channelMessageId?: number;
+};
+
+export type PackStatus = "collecting" | "naming" | "ready";
+
+export type VaultPack = {
+  id: string;
+  code?: string;
+  status: PackStatus;
+  ownerId: string;
+  ownerName: string;
+  ownerUsername?: string;
+  name?: string;
+  files: VaultFile[];
   createdAt: string;
+  readyAt?: string;
 };
 
 export type SeenChannel = {
@@ -132,7 +143,7 @@ export type VaultData = {
   channelTitle?: string;
   shareLinks: boolean;
   offset: number;
-  items: VaultItem[];
+  packs: VaultPack[];
   seenChannels: SeenChannel[];
   lastError?: string;
   connectedAt?: string;
@@ -148,24 +159,22 @@ export type VaultStatus = {
   channelId?: string;
   channelTitle?: string;
   shareLinks: boolean;
-  itemCount: number;
+  packCount: number;
   lastError?: string;
   seenChannels: SeenChannel[];
   connectedAt?: string;
 };
 
-export type VaultItemPublic = {
+export type VaultPackPublic = {
   code: string;
+  name: string;
   ownerId: string;
   ownerName: string;
   ownerUsername?: string;
-  kind: VaultKind;
-  name: string;
-  preview?: string;
-  mime?: string;
-  size?: number;
+  fileCount: number;
+  files: { name: string; kind: VaultKind; size?: number }[];
   createdAt: string;
-  inChannel: boolean;
+  link?: string;
 };
 
 export type Draft = {
@@ -184,7 +193,7 @@ export function emptyVault(): VaultData {
     enabled: false,
     shareLinks: true,
     offset: 0,
-    items: [],
+    packs: [],
     seenChannels: [],
   };
 }

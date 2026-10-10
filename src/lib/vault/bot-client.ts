@@ -1,4 +1,4 @@
-import type { InlineButton, TgChat, TgUpdate, TgUser, VaultItem, VaultKind } from "./types";
+import type { InlineButton, TgChat, TgUpdate, TgUser, VaultFile, VaultKind } from "./types";
 
 const API = "https://api.telegram.org";
 
@@ -63,7 +63,7 @@ const fileMethod: Record<Exclude<VaultKind, "text">, { method: string; field: st
 export const botCommands = [
   { command: "start", description: "开始使用" },
   { command: "help", description: "查看怎么存、怎么取" },
-  { command: "list", description: "我保存的文件" },
+  { command: "list", description: "我打包好的" },
   { command: "search", description: "按名称搜索" },
   { command: "get", description: "按编号取回" },
   { command: "del", description: "按编号删除" },
@@ -182,7 +182,7 @@ export class BotClient {
     return this.call("deleteMessage", { chat_id: chatId, message_id: messageId });
   }
 
-  sendFile(chatId: string, item: VaultItem) {
+  sendFile(chatId: string, item: VaultFile) {
     if (item.kind === "text" || !item.fileId) {
       return this.sendMessage(chatId, item.text || item.name);
     }

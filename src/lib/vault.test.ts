@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -16,7 +16,7 @@ import {
 import { reduceVault } from "./vault/reduce";
 import { createVaultRepository } from "./vault/store";
 import { toStatus } from "./vault/service";
-import { emptyVault, VAULT_LIMITS, type TgUpdate, type VaultData, type VaultItem } from "./vault/types";
+import { emptyVault, VAULT_LIMITS, type TgUpdate, type VaultData, type VaultFile, type VaultPack } from "./vault/types";
 
 const TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw";
 const CODES = ["abcdefgj", "kmnpqrst", "uvwxyz23", "456789ab", "jkmnpqrs", "tuvwxyz2"];
@@ -42,6 +42,30 @@ function privateFile(updateId: number, messageId: number, name = "报告.pdf"): 
   });
 }
 
+function textMessage(updateId: number, messageId: number, text: string, fromId = 7): TgUpdate {
+  return update({
+    update_id: updateId,
+    message: {
+      message_id: messageId,
+      chat: { id: fromId, type: "private" },
+      from: { id: fromId, first_name: fromId === 7 ? "林夏" : "周衡", username: fromId === 7 ? "lin" : undefined },
+      text,
+    },
+  });
+}
+
+function press(updateId: number, data: string, fromId = 7): TgUpdate {
+  return update({
+    update_id: updateId,
+    callback_query: {
+      id: `cb-${updateId}`,
+      from: { id: fromId, first_name: fromId === 7 ? "林夏" : "周衡" },
+      data,
+      message: { message_id: 90 + updateId, chat: { id: fromId, type: "private" } },
+    },
+  });
+}
+
 function baseData(extra?: Partial<VaultData>): VaultData {
   return {
     ...emptyVault(),
@@ -49,6 +73,15 @@ function baseData(extra?: Partial<VaultData>): VaultData {
     botUsername: "storebot",
     ...extra,
   };
+}
+
+function step(data: VaultData, incoming: TgUpdate, now: string, nextCode: () => string) {
+  return reduceVault(data, incoming, { now, nextCode });
+}
+
+function finishPack(data: VaultData, name: string, now: string, nextCode: () => string, updateId = 800) {
+  const asked = step(data, press(updateId, "e"), now, nextCode);
+  return step(asked.data, textMessage(updateId + 1, updateId + 1, name), now, nextCode);
 }
 
 test("hides the middle of a BotFather token", () => {
@@ -91,162 +124,135 @@ test("formats sizes and picks the largest photo", () => {
   assert.deepEqual(commandOf("/start@storebot abcdefgj"), { name: "start", arg: "abcdefgj" });
 });
 
-test("stores a private file and gives back a code", () => {
-  const reduced = reduceVault(baseData(), privateFile(1, 10), { now: "2026-10-09T00:00:00.000Z", nextCode: codes() });
-  assert.equal(reduced.data.items.length, 1);
-  assert.equal(reduced.data.items[0]?.code, "abcdefgj");
-  assert.equal(reduced.data.items[0]?.ownerName, "林夏");
-  assert.match(reduced.decision.replies[0]?.text ?? "", /已存好/);
-  assert.match(reduced.decision.replies[0]?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
-  assert.equal(reduced.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "g:abcdefgj");
+test("keeps files in one group until the user finishes and names it", () => {
+  const nextCode = codes();
+  const now = "2026-10-09T00:00:00.000Z";
+  const first = step(baseData(), privateFile(1, 10, "报告.pdf"), now, nextCode);
+  assert.equal(first.data.packs.length, 1);
+  assert.equal(first.data.packs[0]?.status, "collecting");
+  assert.equal(first.data.packs[0]?.code, undefined);
+  assert.match(first.decision.replies[0]?.text ?? "", /已收下 1 个/);
+  assert.equal(first.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "c");
+  assert.equal(first.decision.replies[0]?.keyboard?.[0]?.[1]?.callback_data, "e");
+
+  const second = step(first.data, privateFile(2, 11, "封面.png"), now, nextCode);
+  assert.equal(second.data.packs.length, 1);
+  assert.equal(second.data.packs[0]?.files.length, 2);
+  assert.equal(second.data.packs[0]?.status, "collecting");
+  assert.match(second.decision.replies[0]?.text ?? "", /已收下 2 个/);
+
+  const talking = step(second.data, textMessage(3, 12, "先别起名"), now, nextCode);
+  assert.equal(talking.data.packs[0]?.status, "collecting");
+  assert.equal(talking.data.packs[0]?.files.length, 2);
+  assert.match(talking.decision.replies[0]?.text ?? "", /结束/);
+
+  const asked = step(talking.data, press(4, "e"), now, nextCode);
+  assert.equal(asked.data.packs[0]?.status, "naming");
+  assert.equal(asked.data.packs[0]?.code, undefined);
+  assert.match(asked.decision.replies[0]?.text ?? "", /把名称发过来/);
+
+  const extra = step(asked.data, privateFile(5, 13, "附录.pdf"), now, nextCode);
+  assert.equal(extra.data.packs[0]?.status, "collecting");
+  assert.equal(extra.data.packs[0]?.files.length, 3);
+  assert.equal(extra.data.packs[0]?.code, undefined);
+
+  const named = finishPack(extra.data, "周报", now, nextCode, 6);
+  const ready = named.data.packs.filter((pack) => pack.status === "ready");
+  assert.equal(ready.length, 1);
+  assert.equal(named.data.packs.length, 1);
+  assert.equal(ready[0]?.code, "abcdefgj");
+  assert.equal(ready[0]?.name, "周报");
+  assert.equal(ready[0]?.files.length, 3);
+  assert.match(named.decision.replies[0]?.text ?? "", /已生成/);
+  assert.match(named.decision.replies[0]?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
+  assert.equal(named.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "g:abcdefgj");
 });
 
 test("does not store the same message twice", () => {
-  const first = reduceVault(baseData(), privateFile(1, 10), { now: "2026-10-09T00:00:00.000Z", nextCode: codes() });
-  const second = reduceVault(first.data, privateFile(2, 10), { now: "2026-10-09T00:01:00.000Z", nextCode: codes() });
-  assert.equal(second.data.items.length, 1);
-  assert.match(second.decision.replies[0]?.text ?? "", /abcdefgj/);
+  const nextCode = codes();
+  const first = step(baseData(), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode);
+  const second = step(first.data, privateFile(2, 10), "2026-10-09T00:01:00.000Z", nextCode);
+  assert.equal(second.data.packs[0]?.files.length, 1);
+  assert.match(second.decision.replies[0]?.text ?? "", /已收下 1 个/);
 });
 
-test("keeps each person's files private when sharing is off", () => {
-  const saved = reduceVault(baseData({ shareLinks: false }), privateFile(1, 10), {
-    now: "2026-10-09T00:00:00.000Z",
-    nextCode: codes(),
-  });
-  const stranger = reduceVault(
+test("keeps each person's packs private when sharing is off", () => {
+  const nextCode = codes();
+  const saved = finishPack(
+    step(baseData({ shareLinks: false }), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode).data,
+    "周报",
+    "2026-10-09T00:00:00.000Z",
+    nextCode,
+  );
+  const stranger = step(
     saved.data,
-    update({
-      update_id: 2,
-      message: {
-        message_id: 2,
-        chat: { id: 8, type: "private" },
-        from: { id: 8, first_name: "周衡" },
-        text: "/get abcdefgj",
-      },
-    }),
-    { now: "2026-10-09T00:02:00.000Z", nextCode: codes() },
+    textMessage(20, 20, "/get abcdefgj", 8),
+    "2026-10-09T00:02:00.000Z",
+    nextCode,
   );
   assert.equal(stranger.decision.deliver, undefined);
-  assert.match(stranger.decision.replies[0]?.text ?? "", /只有保存它的人/);
-  const owner = reduceVault(
-    saved.data,
-    update({
-      update_id: 3,
-      message: {
-        message_id: 3,
-        chat: { id: 7, type: "private" },
-        from: { id: 7, first_name: "林夏" },
-        text: "/get abcdefgj",
-      },
-    }),
-    { now: "2026-10-09T00:03:00.000Z", nextCode: codes() },
-  );
+  assert.match(stranger.decision.replies[0]?.text ?? "", /只有打包的人/);
+  const owner = step(saved.data, textMessage(21, 21, "/get abcdefgj"), "2026-10-09T00:03:00.000Z", nextCode);
   assert.equal(owner.decision.deliver?.code, "abcdefgj");
 });
 
-test("lets a shared link retrieve the file and only the owner delete it", () => {
-  const saved = reduceVault(baseData(), privateFile(1, 10), { now: "2026-10-09T00:00:00.000Z", nextCode: codes() });
-  const shared = reduceVault(
-    saved.data,
-    update({
-      update_id: 2,
-      message: {
-        message_id: 4,
-        chat: { id: 8, type: "private" },
-        from: { id: 8, first_name: "周衡" },
-        text: "/start abcdefgj",
-      },
-    }),
-    { now: "2026-10-09T00:02:00.000Z", nextCode: codes() },
+test("lets a shared link retrieve the whole pack and only the owner delete it", () => {
+  const nextCode = codes();
+  const saved = finishPack(
+    step(baseData(), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode).data,
+    "周报",
+    "2026-10-09T00:00:00.000Z",
+    nextCode,
   );
+  const shared = step(saved.data, textMessage(20, 20, "/start abcdefgj", 8), "2026-10-09T00:02:00.000Z", nextCode);
   assert.equal(shared.decision.deliver?.chatId, "8");
-  const removed = reduceVault(
-    saved.data,
-    update({
-      update_id: 3,
-      callback_query: {
-        id: "cb",
-        from: { id: 8, first_name: "周衡" },
-        data: "y:abcdefgj",
-        message: { message_id: 9, chat: { id: 8, type: "private" } },
-      },
-    }),
-    { now: "2026-10-09T00:03:00.000Z", nextCode: codes() },
-  );
-  assert.equal(removed.data.items.length, 1);
+  const removed = step(saved.data, press(21, "y:abcdefgj", 8), "2026-10-09T00:03:00.000Z", nextCode);
+  assert.equal(removed.data.packs.filter((pack) => pack.status === "ready").length, 1);
   assert.match(removed.decision.callbackText ?? "", /只能删除/);
-  const owner = reduceVault(
-    saved.data,
-    update({
-      update_id: 4,
-      message: {
-        message_id: 5,
-        chat: { id: 7, type: "private" },
-        from: { id: 7, first_name: "林夏" },
-        text: "/del abcdefgj",
-      },
-    }),
-    { now: "2026-10-09T00:04:00.000Z", nextCode: codes() },
-  );
-  assert.equal(owner.data.items.length, 0);
+  const owner = step(saved.data, textMessage(22, 22, "/del abcdefgj"), "2026-10-09T00:04:00.000Z", nextCode);
+  assert.equal(owner.data.packs.filter((pack) => pack.status === "ready").length, 0);
   assert.equal(owner.decision.replies[0]?.text.includes("已删除"), true);
 });
 
-test("pages a person's list and searches by name", () => {
+test("pages ready packs and searches by the pack name", () => {
   let data = baseData();
   const nextCode = codes();
   for (let index = 0; index < 6; index += 1) {
-    const reduced = reduceVault(data, privateFile(index + 1, index + 1, `笔记${index}.txt`), {
-      now: `2026-10-09T00:0${index}:00.000Z`,
-      nextCode,
-    });
-    data = reduced.data;
+    const collected = step(data, privateFile(index + 1, index + 1, `文件${index}.pdf`), `2026-10-09T00:0${index}:00.000Z`, nextCode);
+    const named = finishPack(collected.data, `笔记${index}`, `2026-10-09T00:0${index}:00.000Z`, nextCode, 100 + index * 2);
+    data = named.data;
   }
-  const listed = reduceVault(
-    data,
-    update({
-      update_id: 20,
-      message: {
-        message_id: 30,
-        chat: { id: 7, type: "private" },
-        from: { id: 7, first_name: "林夏" },
-        text: "/list 2",
-      },
-    }),
-    { now: "2026-10-09T00:10:00.000Z", nextCode: codes() },
-  );
+  assert.equal(data.packs.filter((pack) => pack.status === "ready").length, 6);
+  const listed = step(data, textMessage(40, 40, "/list 2"), "2026-10-09T00:10:00.000Z", nextCode);
   assert.match(listed.decision.replies[0]?.text ?? "", /第 2\/2 页/);
   assert.equal(listed.decision.replies[0]?.keyboard?.at(-1)?.some((button) => button.callback_data === "l:1"), true);
-  const found = reduceVault(
-    data,
-    update({
-      update_id: 21,
-      message: {
-        message_id: 31,
-        chat: { id: 7, type: "private" },
-        from: { id: 7, first_name: "林夏" },
-        text: "/search 笔记1",
-      },
-    }),
-    { now: "2026-10-09T00:11:00.000Z", nextCode: codes() },
-  );
-  assert.match(found.decision.replies[0]?.text ?? "", /笔记1\.txt/);
-  assert.doesNotMatch(found.decision.replies[0]?.text ?? "", /笔记2\.txt/);
+  const found = step(data, textMessage(41, 41, "/search 笔记1"), "2026-10-09T00:11:00.000Z", nextCode);
+  assert.match(found.decision.replies[0]?.text ?? "", /笔记1/);
+  assert.doesNotMatch(found.decision.replies[0]?.text ?? "", /笔记2/);
+});
+
+test("cancel drops the open group before it has a code", () => {
+  const nextCode = codes();
+  const collected = step(baseData(), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode);
+  const dropped = step(collected.data, textMessage(2, 11, "/cancel"), "2026-10-09T00:01:00.000Z", nextCode);
+  assert.equal(dropped.data.packs.length, 0);
+  assert.match(dropped.decision.replies[0]?.text ?? "", /已取消这一组/);
 });
 
 test("remembers a channel without storing its posts as files", () => {
-  const reduced = reduceVault(
+  const reduced = step(
     baseData(),
     update({
       update_id: 1,
       my_chat_member: { chat: { id: -100123, type: "channel", title: "仓库" } },
     }),
-    { now: "2026-10-09T00:00:00.000Z", nextCode: codes() },
+    "2026-10-09T00:00:00.000Z",
+    codes(),
   );
-  assert.equal(reduced.data.items.length, 0);
+  assert.equal(reduced.data.packs.length, 0);
   assert.equal(reduced.data.seenChannels[0]?.id, "-100123");
   assert.equal(reduced.data.seenChannels[0]?.title, "仓库");
-  const posted = reduceVault(
+  const posted = step(
     reduced.data,
     update({
       update_id: 2,
@@ -256,32 +262,20 @@ test("remembers a channel without storing its posts as files", () => {
         text: "不要当成用户文件",
       },
     }),
-    { now: "2026-10-09T00:01:00.000Z", nextCode: codes() },
+    "2026-10-09T00:01:00.000Z",
+    codes(),
   );
-  assert.equal(posted.data.items.length, 0);
+  assert.equal(posted.data.packs.length, 0);
 });
 
-test("stops a person at the per-user limit", () => {
-  const items = Array.from({ length: VAULT_LIMITS.maxPerUser }, (_, index) => ({
-    code: `code${index}`,
-    ownerId: "7",
-    ownerName: "林夏",
-    kind: "text" as const,
-    name: "旧",
-    text: "旧",
-    chatId: "7",
-    messageId: index + 1,
-    createdAt: "2026-10-08T00:00:00.000Z",
-  }));
-  const reduced = reduceVault(baseData({ items }), privateFile(1, 9000), {
-    now: "2026-10-09T00:00:00.000Z",
-    nextCode: codes(),
-  });
-  assert.equal(reduced.data.items.length, VAULT_LIMITS.maxPerUser);
+test("stops a person at the pack limit", () => {
+  const packs = Array.from({ length: VAULT_LIMITS.maxPacksPerUser }, (_, index) => readyPack(index));
+  const reduced = step(baseData({ packs }), privateFile(1, 9000), "2026-10-09T00:00:00.000Z", codes());
+  assert.equal(reduced.data.packs.length, VAULT_LIMITS.maxPacksPerUser);
   assert.match(reduced.decision.replies[0]?.text ?? "", /太多/);
 });
 
-test("copies a saved file into the storage channel", async () => {
+test("copies a collected file into the storage channel before it is named", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "vault-"));
   try {
     const repo = createVaultRepository(dir);
@@ -291,15 +285,17 @@ test("copies a saved file into the storage channel", async () => {
     await applyVaultUpdate(privateFile(5, 10), repo, io, { now: "2026-10-09T00:00:00.000Z", nextCode: codes() });
     const saved = await repo.load();
     assert.equal(saved.offset, 6);
-    assert.equal(saved.items[0]?.channelMessageId, 42);
-    assert.equal(saved.items[0]?.channelId, "-100555");
-    assert.match(sent[0] ?? "", /已存好/);
+    assert.equal(saved.packs[0]?.status, "collecting");
+    assert.equal(saved.packs[0]?.code, undefined);
+    assert.equal(saved.packs[0]?.files[0]?.channelMessageId, 42);
+    assert.equal(saved.packs[0]?.files[0]?.channelId, "-100555");
+    assert.match(sent[0] ?? "", /已收下 1 个/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("keeps the code when the channel copy fails", async () => {
+test("keeps the open group when the channel copy fails", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "vault-"));
   try {
     const repo = createVaultRepository(dir);
@@ -309,8 +305,9 @@ test("keeps the code when the channel copy fails", async () => {
       throw new Error("没有权限");
     }), { now: "2026-10-09T00:00:00.000Z", nextCode: codes() });
     const saved = await repo.load();
-    assert.equal(saved.items.length, 1);
-    assert.equal(saved.items[0]?.channelMessageId, undefined);
+    assert.equal(saved.packs.length, 1);
+    assert.equal(saved.packs[0]?.status, "collecting");
+    assert.equal(saved.packs[0]?.files[0]?.channelMessageId, undefined);
     assert.match(sent[0] ?? "", /还没放进仓库频道/);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -318,29 +315,17 @@ test("keeps the code when the channel copy fails", async () => {
 });
 
 test("status never returns the raw token", () => {
-  const status = toStatus(baseData({ token: TOKEN, enabled: true, items: [] }), true);
+  const status = toStatus(baseData({ token: TOKEN, enabled: true, packs: [readyPack(0)] }), true);
   const body = JSON.stringify(status);
   assert.equal(status.connected, true);
   assert.equal(status.running, true);
+  assert.equal(status.packCount, 1);
   assert.equal(status.tokenHint, "123456789:••••Dsaw");
   assert.equal(body.includes("AAHdqTcvCH1vGWJxfSeofSAs0K5PALD"), false);
 });
 
 test("chooses channel copy before a file id from another bot", () => {
-  const item: VaultItem = {
-    code: "abcdefgj",
-    ownerId: "7",
-    ownerName: "林夏",
-    botId: "1",
-    kind: "document",
-    name: "a.pdf",
-    fileId: "abc",
-    chatId: "7",
-    messageId: 1,
-    channelId: "-1001",
-    channelMessageId: 9,
-    createdAt: "2026-10-09T00:00:00.000Z",
-  };
+  const item = storedFile();
   assert.equal(retrievalPlan(item, "2"), "channel");
   assert.equal(retrievalPlan({ ...item, channelId: undefined, channelMessageId: undefined }, "2"), "unavailable");
   assert.equal(retrievalPlan({ ...item, channelId: undefined, channelMessageId: undefined }, "1"), "file");
@@ -360,21 +345,7 @@ test("sends the stored file back through the bot client", async () => {
       calls.push("file");
     },
   };
-  const item: VaultItem = {
-    code: "abcdefgj",
-    ownerId: "7",
-    ownerName: "林夏",
-    botId: "99",
-    kind: "document",
-    name: "a.pdf",
-    fileId: "abc",
-    chatId: "7",
-    messageId: 1,
-    channelId: "-1001",
-    channelMessageId: 9,
-    createdAt: "2026-10-09T00:00:00.000Z",
-  };
-  await deliverItem(client as unknown as BotClient, "7", item, "99");
+  await deliverItem(client as unknown as BotClient, "7", storedFile(1, "99"), "99");
   assert.deepEqual(calls, ["copy", "file"]);
 });
 
@@ -396,19 +367,53 @@ test("explains a bad token without echoing it", async () => {
   assert.equal(canPostInChannel({ status: "member" }), false);
 });
 
-test("round-trips the vault file", async () => {
+test("round-trips the vault file and ignores the old per-file list", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "vault-"));
   try {
+    await writeFile(
+      path.join(dir, "vault.json"),
+      JSON.stringify({ token: TOKEN, enabled: true, shareLinks: false, items: [{ code: "old" }] }),
+    );
     const repo = createVaultRepository(dir);
-    await repo.update((current) => ({ ...current, token: TOKEN, shareLinks: false, enabled: true }));
     const loaded = await repo.load();
     assert.equal(loaded.token, TOKEN);
     assert.equal(loaded.shareLinks, false);
     assert.equal(loaded.enabled, true);
+    assert.deepEqual(loaded.packs, []);
+    await repo.update((current) => ({ ...current, packs: [readyPack(0)] }));
+    const again = await repo.load();
+    assert.equal(again.packs[0]?.code, "abcdefgj");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+function readyPack(index: number): VaultPack {
+  return {
+    id: `code${index}`,
+    code: CODES[index] ?? `code${index}`.slice(0, 8).padEnd(8, "a"),
+    status: "ready",
+    ownerId: "7",
+    ownerName: "林夏",
+    name: `旧${index}`,
+    files: [storedFile(index + 1)],
+    createdAt: "2026-10-08T00:00:00.000Z",
+    readyAt: "2026-10-08T00:00:00.000Z",
+  };
+}
+
+function storedFile(messageId = 1, botId = "1"): VaultFile {
+  return {
+    botId,
+    kind: "document",
+    name: "a.pdf",
+    fileId: "abc",
+    chatId: "7",
+    messageId,
+    channelId: "-1001",
+    channelMessageId: 9,
+  };
+}
 
 function fakeIo(sent: string[], copy: () => Promise<number>): VaultIO {
   return {

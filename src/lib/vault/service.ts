@@ -7,14 +7,14 @@ import { vaultRepository, type VaultRepository } from "./store";
 import {
   VAULT_LIMITS,
   type VaultData,
-  type VaultItem,
-  type VaultItemPublic,
+  type VaultPack,
+  type VaultPackPublic,
   type VaultStatus,
 } from "./types";
 
 export type VaultView = {
   status: VaultStatus;
-  items: VaultItemPublic[];
+  items: VaultPackPublic[];
   page: number;
   pages: number;
   total: number;
@@ -36,20 +36,17 @@ function runtime(): Runtime {
   return root.__xunzhanVault;
 }
 
-export function toPublic(item: VaultItem): VaultItemPublic {
-  const preview = item.text || item.caption;
+export function toPublic(pack: VaultPack, username?: string): VaultPackPublic {
   return {
-    code: item.code,
-    ownerId: item.ownerId,
-    ownerName: item.ownerName,
-    ownerUsername: item.ownerUsername,
-    kind: item.kind,
-    name: item.name,
-    preview: preview ? preview.slice(0, 120) : undefined,
-    mime: item.mime,
-    size: item.size,
-    createdAt: item.createdAt,
-    inChannel: Boolean(item.channelMessageId),
+    code: pack.code || "",
+    name: pack.name || "未命名",
+    ownerId: pack.ownerId,
+    ownerName: pack.ownerName,
+    ownerUsername: pack.ownerUsername,
+    fileCount: pack.files.length,
+    files: pack.files.map((file) => ({ name: file.name, kind: file.kind, size: file.size })),
+    createdAt: pack.readyAt || pack.createdAt,
+    link: username && pack.code ? `https://t.me/${username}?start=${pack.code}` : undefined,
   };
 }
 
@@ -64,7 +61,7 @@ export function toStatus(data: VaultData, running: boolean): VaultStatus {
     channelId: data.channelId,
     channelTitle: data.channelTitle,
     shareLinks: data.shareLinks,
-    itemCount: data.items.length,
+    packCount: data.packs.filter((pack) => pack.status === "ready").length,
     lastError: runtime().lastError || data.lastError,
     seenChannels: data.seenChannels,
     connectedAt: data.connectedAt,
@@ -72,10 +69,22 @@ export function toStatus(data: VaultData, running: boolean): VaultStatus {
 }
 
 function viewFrom(data: VaultData, query: string, page: number): VaultView {
-  const listed = queryItems(data.items, query, page, VAULT_LIMITS.adminPageSize);
+  const ready = data.packs.filter((pack) => pack.status === "ready" && pack.code);
+  const listed = queryItems(
+    ready.map((pack) => ({
+      ...pack,
+      name: pack.name || "",
+      code: pack.code || "",
+      text: pack.files.map((file) => file.name).join("\n"),
+      createdAt: pack.readyAt || pack.createdAt,
+    })),
+    query,
+    page,
+    VAULT_LIMITS.adminPageSize,
+  );
   return {
     status: toStatus(data, runtime().running),
-    items: listed.items.map(toPublic),
+    items: listed.items.map((pack) => toPublic(pack, data.botUsername)),
     page: listed.page,
     pages: listed.pages,
     total: listed.total,
@@ -186,11 +195,16 @@ export async function forgetVault(repo: VaultRepository = vaultRepository()) {
 
 export async function deleteVaultItem(code: string, repo: VaultRepository = vaultRepository()) {
   const current = await repo.load();
-  const item = current.items.find((entry) => entry.code === code);
-  if (!item) throw new HttpError(404, "没有这个编号");
-  await repo.update((data) => ({ ...data, items: data.items.filter((entry) => entry.code !== code) }));
-  if (item.channelId && item.channelMessageId && current.token) {
-    await new BotClient(current.token).deleteMessage(item.channelId, item.channelMessageId).catch(() => undefined);
+  const pack = current.packs.find((entry) => entry.code === code);
+  if (!pack) throw new HttpError(404, "没有这个编号");
+  await repo.update((data) => ({ ...data, packs: data.packs.filter((entry) => entry.code !== code) }));
+  if (current.token) {
+    const client = new BotClient(current.token);
+    for (const file of pack.files) {
+      if (file.channelId && file.channelMessageId) {
+        await client.deleteMessage(file.channelId, file.channelMessageId).catch(() => undefined);
+      }
+    }
   }
   return viewFrom(await repo.load(), "", 1);
 }
@@ -248,11 +262,16 @@ async function poll(
   controller: AbortController,
 ) {
   let failures = 0;
+  let announced = false;
   while (runtime().generation === generation) {
     const data = await repo.load();
     if (!data.enabled || !data.token || runtime().generation !== generation) return;
     const client = clientFor(data.token);
     try {
+      if (!announced) {
+        announced = true;
+        await client.setCommands().catch(() => undefined);
+      }
       const updates = await client.getUpdates(data.offset, controller.signal);
       if (runtime().generation !== generation) return;
       failures = 0;

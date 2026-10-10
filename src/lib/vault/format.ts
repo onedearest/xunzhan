@@ -1,4 +1,4 @@
-import { CODE_ALPHABET, VAULT_LIMITS, type Draft, type TgMessage, type VaultItem, type VaultKind } from "./types";
+import { CODE_ALPHABET, VAULT_LIMITS, type Draft, type TgMessage, type VaultFile, type VaultKind, type VaultPack } from "./types";
 
 export const kindLabel: Record<VaultKind, string> = {
   text: "文字",
@@ -115,71 +115,70 @@ function fileDraft(kind: VaultKind, name: string, file: { file_id: string; file_
 
 export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean }) {
   const lines = [
-    "直接把文件、图片、视频、语音或一段文字发给我，我会给你一个编号。",
+    "把要存的文件发给我，可以连续发很多个。它们会先放在同一组里。",
+    "发完后点「结束」，再发一个名称。我才会生成编号和链接。",
     "",
-    "/list 查看已保存的",
+    "/list 查看已经打包的",
     "/search 关键词",
     "/get 编号",
     "/del 编号",
     "/stats 查看用量",
   ];
   if (options.shareLinks && options.username) {
-    lines.push("", `分享链接的样子：https://t.me/${options.username}?start=编号`);
-    lines.push("把链接发给别人，对方打开就能取回。");
+    lines.push("", `链接的样子：https://t.me/${options.username}?start=编号`);
+    lines.push("打开链接就能取回这一整组。");
   } else if (!options.shareLinks) {
-    lines.push("", "分享已关闭，只有保存的人自己能取回。");
+    lines.push("", "分享已关闭，只有打包的人自己能取回。");
   }
   if (!options.channelBound) {
-    lines.push("", "文件留在 Telegram 上。网页里如果绑定了私密频道，会再复制一份进去，聊天删了也能取回。");
+    lines.push("", "文件留在 Telegram 上。网页里如果绑定了私密频道，会再复制一份进去。");
   }
   return lines.join("\n");
 }
 
-export function savedText(item: VaultItem, options: { username?: string; shareLinks: boolean }) {
-  const lines = ["已存好", "", `名称：${clip(item.name, 80)}`, `类型：${kindLabel[item.kind]}`];
-  const size = formatSize(item.size);
-  if (size) lines.push(`大小：${size}`);
-  lines.push(`编号：${item.code}`, "", `取回：/get ${item.code}`);
-  if (options.shareLinks && options.username) {
-    lines.push(`分享：https://t.me/${options.username}?start=${item.code}`);
+export function packedText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
+  const lines = [
+    "已生成",
+    "",
+    `名称：${clip(pack.name || "未命名", 80)}`,
+    `文件：${pack.files.length} 个`,
+    `编号：${pack.code}`,
+    "",
+    `取回：/get ${pack.code}`,
+  ];
+  if (options.shareLinks && options.username && pack.code) {
+    lines.push(`链接：https://t.me/${options.username}?start=${pack.code}`);
   } else if (!options.shareLinks) {
     lines.push("只有你自己能用这个编号取回。");
   }
   return lines.join("\n");
 }
 
-export function listText(items: VaultItem[], page: number, pages: number, total: number) {
-  if (total === 0) return "还没有保存过。直接把文件、图片或文字发给我。";
-  const lines = items.map((item, index) => {
+export function listText(packs: VaultPack[], page: number, pages: number, total: number) {
+  if (total === 0) return "还没有打包。直接把文件发给我，结束之后再起名称。";
+  const lines = packs.map((pack, index) => {
     const number = (page - 1) * VAULT_LIMITS.userPageSize + index + 1;
-    const size = formatSize(item.size);
-    return `${number}. ${clip(item.name, 40)}${size ? ` · ${size}` : ""} · ${item.code}`;
+    return `${number}. ${clip(pack.name || "未命名", 40)} · ${pack.files.length} 个 · ${pack.code}`;
   });
-  return [`你的文件，第 ${page}/${pages} 页，共 ${total} 个`, "", ...lines, "", "点下面的按钮取回或删除。"].join("\n");
+  return [`你的打包，第 ${page}/${pages} 页，共 ${total} 组`, "", ...lines, "", "点下面的按钮取回或删除。"].join("\n");
 }
 
-export function searchText(query: string, items: VaultItem[], total: number) {
-  if (!items.length) return `没有找到「${clip(query, 40)}」。`;
-  const lines = items.map((item) => {
-    const size = formatSize(item.size);
-    return `${clip(item.name, 40)}${size ? ` · ${size}` : ""} · ${item.code}`;
-  });
-  const more = total > items.length ? ["", `还有 ${total - items.length} 个，把词写得更具体一些。`] : [];
-  return [`「${clip(query, 40)}」找到 ${total} 个`, "", ...lines, ...more].join("\n");
+export function searchText(query: string, packs: VaultPack[], total: number) {
+  if (!packs.length) return `没有找到「${clip(query, 40)}」。`;
+  const lines = packs.map((pack) => `${clip(pack.name || "未命名", 40)} · ${pack.files.length} 个 · ${pack.code}`);
+  const more = total > packs.length ? ["", `还有 ${total - packs.length} 组，把词写得更具体一些。`] : [];
+  return [`「${clip(query, 40)}」找到 ${total} 组`, "", ...lines, ...more].join("\n");
 }
 
-export function statsText(items: VaultItem[], channelTitle?: string) {
-  const counts = new Map<VaultKind, number>();
-  for (const item of items) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
-  const parts = [...counts.entries()].map(([kind, count]) => `${kindLabel[kind]} ${count}`);
+export function statsText(packs: VaultPack[], channelTitle?: string) {
+  const files = packs.reduce((sum, pack) => sum + pack.files.length, 0);
   return [
-    `已保存 ${items.length} 个`,
-    parts.join(" · ") || "还是空的",
+    `已打包 ${packs.length} 组，共 ${files} 个文件`,
     channelTitle ? `仓库频道：${channelTitle}` : "仓库频道：还没设置。编号仍然可以取回。",
   ].join("\n");
 }
 
-export function retrievalPlan(item: VaultItem, currentBotId?: string) {
+export function retrievalPlan(item: VaultFile, currentBotId?: string) {
   if (item.channelId && item.channelMessageId) return "channel" as const;
   const sameBot = !item.botId || !currentBotId || item.botId === currentBotId;
   if (!sameBot) return "unavailable" as const;

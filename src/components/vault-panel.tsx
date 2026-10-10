@@ -8,12 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatSize, kindLabel } from "@/lib/vault/format";
-import type { VaultItemPublic, VaultKind, VaultStatus } from "@/lib/vault/types";
+import { formatSize } from "@/lib/vault/format";
+import type { VaultPackPublic, VaultStatus } from "@/lib/vault/types";
 
 type VaultView = {
   status: VaultStatus;
-  items: VaultItemPublic[];
+  items: VaultPackPublic[];
   page: number;
   pages: number;
   total: number;
@@ -22,7 +22,8 @@ type VaultView = {
 const steps = [
   "在 Telegram 打开 @BotFather，发送 /newbot，按提示起名，复制它发来的令牌。",
   "把令牌贴到下面，点「开始接收」。讯栈会一直在这台机器上收消息。",
-  "打开你的机器人，把文件、图片、视频、语音或文字发给它。它会回复编号，/list、/get、/del 可以管理。",
+  "打开你的机器人，把文件连续发给它。它可以先收成一组。",
+  "点「结束」，再发一个名称。机器人这时才给出编号和链接，打开就能取回这一整组。",
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -185,7 +186,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
           <div>
             <h1 className="text-2xl font-medium">存储机器人</h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              贴上 @BotFather 的令牌就能用。别人把文件发给机器人，机器人回一个编号；文件本身留在 Telegram 上，这里只记编号和取回方式。
+              贴上 @BotFather 的令牌就能用。文件先收成一组，点结束并写上名称之后，才生成一个编号和一条链接。文件本身留在 Telegram 上。
             </p>
           </div>
           {onClose || homeHref ? (
@@ -228,7 +229,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
             {status?.tokenHint ? <span className="text-xs text-muted-foreground">{status.tokenHint}</span> : null}
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
-            {status ? `已保存 ${status.itemCount} 个` : "正在读取…"}
+            {status ? `已打包 ${status.packCount} 组` : "正在读取…"}
             {status?.channelTitle ? ` · 仓库频道 ${status.channelTitle}` : " · 还没绑定仓库频道"}
             {status?.shareLinks ? " · 编号链接可以转给别人" : " · 只有本人能取回"}
           </p>
@@ -336,7 +337,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
 
         <section className="grid gap-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-medium">已保存</h2>
+            <h2 className="text-base font-medium">已打包</h2>
             <Input
               value={query}
               onChange={(event) => {
@@ -352,7 +353,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
             <p className="text-sm text-muted-foreground">正在读取…</p>
           ) : view.items.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              {query ? "没有匹配的文件。" : "还没有文件。在 Telegram 里把文件发给机器人之后，会出现在这里。"}
+              {query ? "没有匹配的打包。" : "还没有打包。在 Telegram 里把文件发给机器人，点结束并写上名称之后，会出现在这里。"}
             </p>
           ) : (
             <ul className="divide-y divide-border rounded-lg border border-border bg-card">
@@ -361,17 +362,22 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate font-medium">{item.name}</span>
-                      <Badge variant="outline">{kindLabel[item.kind as VaultKind]}</Badge>
-                      {item.inChannel ? <Badge variant="secondary">已进频道</Badge> : null}
+                      <Badge variant="outline">{item.fileCount} 个文件</Badge>
                     </div>
                     <p className="mt-1 truncate text-xs text-muted-foreground">
                       {item.code}
-                      {item.size ? ` · ${formatSize(item.size)}` : ""}
                       {` · ${item.ownerName}`}
                       {item.ownerUsername ? ` @${item.ownerUsername}` : ""}
                       {` · ${formatWhen(item.createdAt)}`}
                     </p>
-                    {item.preview ? <p className="mt-1 truncate text-sm text-muted-foreground">{item.preview}</p> : null}
+                    {item.link ? (
+                      <a className="mt-1 block truncate text-sm text-primary underline-offset-4 hover:underline" href={item.link}>
+                        {item.link}
+                      </a>
+                    ) : null}
+                    <p className="mt-1 truncate text-sm text-muted-foreground">
+                      {item.files.map((file) => (file.size ? `${file.name} · ${formatSize(file.size)}` : file.name)).join("、")}
+                    </p>
                   </div>
                   <Button
                     type="button"

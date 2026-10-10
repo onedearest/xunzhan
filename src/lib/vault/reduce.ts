@@ -3,9 +3,9 @@ import {
   draftFromMessage,
   isVaultCode,
   listText,
+  packedText,
   personName,
   queryItems,
-  savedText,
   searchText,
   statsText,
   welcomeText,
@@ -18,7 +18,8 @@ import {
   type TgUpdate,
   type TgUser,
   type VaultData,
-  type VaultItem,
+  type VaultFile,
+  type VaultPack,
 } from "./types";
 
 export type Reply = {
@@ -33,9 +34,9 @@ export type Decision = {
   replies: Reply[];
   callbackId?: string;
   callbackText?: string;
-  copy?: { code: string; fromChat: string; messageId: number; toChat: string };
+  copy?: { fromChat: string; messageId: number; toChat: string };
   deliver?: { chatId: string; code: string };
-  removeChannelMessage?: { channelId: string; messageId: number };
+  removeChannelMessages?: { channelId: string; messageId: number }[];
   channelHint?: string;
 };
 
@@ -43,6 +44,13 @@ type Options = {
   now: string;
   nextCode: () => string;
 };
+
+const collectKeyboard: InlineButton[][] = [
+  [
+    { text: "继续存入", callback_data: "c" },
+    { text: "结束", callback_data: "e" },
+  ],
+];
 
 export function reduceVault(data: VaultData, update: TgUpdate, options: Options): { data: VaultData; decision: Decision } {
   const decision: Decision = { replies: [] };
@@ -67,7 +75,7 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
       decision.replies.push({
         kind: "send",
         chatId: String(message.chat.id),
-        text: "存储请私聊我。把文件直接发给我就可以。",
+        text: "打包请私聊我。把文件直接发给我，结束之后再起名称。",
       });
     }
     return { data: next, decision };
@@ -90,45 +98,68 @@ function reduceCallback(
     decision.callbackText = "这个按钮已经失效了";
     return { data, decision };
   }
+  if (action.type === "continue") {
+    const open = openPack(data, query.from.id);
+    decision.callbackText = open ? "继续发文件" : "先发文件";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      text: open ? "继续把文件发给我。发完再点「结束」。" : "还没有待打包的文件。直接把文件发给我。",
+    });
+    return { data, decision };
+  }
+  if (action.type === "finish") {
+    return askName(data, decision, chatId, query.from.id);
+  }
+  if (action.type === "drop") {
+    const open = openPack(data, query.from.id);
+    decision.callbackText = open ? "已取消" : "没有进行中的打包";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      text: open ? "已取消这一组，还没有编号。" : "现在没有还没起名的一组。",
+    });
+    return open ? { data: dropOpen(data, query.from.id), decision } : { data, decision };
+  }
   if (action.type === "cancel") {
     decision.callbackText = "已取消";
     decision.replies.push({
       kind: messageId ? "edit" : "send",
       chatId,
       messageId,
-      text: "已取消，文件还在。发送 /list 可以再看。",
+      text: "已取消。发送 /list 可以再看。",
     });
     return { data, decision };
   }
   if (action.type === "list") {
-    const owned = ownedItems(data, query.from.id);
-    const listed = queryItems(owned, "", action.page, VAULT_LIMITS.userPageSize);
+    const owned = readyPacks(data, query.from.id);
+    const listed = queryPacks(owned, "", action.page, VAULT_LIMITS.userPageSize);
     decision.callbackText = `第 ${listed.page} 页`;
     decision.replies.push({
       kind: messageId ? "edit" : "send",
       chatId,
       messageId,
       text: listText(listed.items, listed.page, listed.pages, listed.total),
-      keyboard: itemKeyboard(listed.items, listed.page, listed.pages),
+      keyboard: packKeyboard(listed.items, listed.page, listed.pages),
     });
     return { data, decision };
   }
-  const item = data.items.find((entry) => entry.code === action.code);
-  if (!item) {
+  const pack = readyPacks(data).find((entry) => entry.code === action.code);
+  if (!pack?.code) {
     decision.callbackText = "没有这个编号";
     return { data, decision };
   }
   if (action.type === "get") {
-    if (!canRead(data, item, query.from.id)) {
-      decision.callbackText = "这个编号只有保存它的人能取回";
+    if (!canRead(data, pack, query.from.id)) {
+      decision.callbackText = "这个编号只有打包的人能取回";
       return { data, decision };
     }
     decision.callbackText = "已发给你";
-    decision.deliver = { chatId, code: item.code };
+    decision.deliver = { chatId, code: pack.code };
     return { data, decision };
   }
-  if (item.ownerId !== String(query.from.id)) {
-    decision.callbackText = "只能删除自己保存的文件";
+  if (pack.ownerId !== String(query.from.id)) {
+    decision.callbackText = "只能删除自己打包的";
     return { data, decision };
   }
   if (action.type === "ask-delete") {
@@ -137,10 +168,10 @@ function reduceCallback(
       kind: messageId ? "edit" : "send",
       chatId,
       messageId,
-      text: `确定删除「${item.name}」？编号 ${item.code}。删除后分享链接也会失效。`,
+      text: `确定删除「${pack.name}」？编号 ${pack.code}。删除后链接也会失效。`,
       keyboard: [
         [
-          { text: "确定删除", callback_data: `y:${item.code}` },
+          { text: "确定删除", callback_data: `y:${pack.code}` },
           { text: "取消", callback_data: "x" },
         ],
       ],
@@ -148,16 +179,14 @@ function reduceCallback(
     return { data, decision };
   }
   decision.callbackText = "已删除";
-  if (item.channelId && item.channelMessageId) {
-    decision.removeChannelMessage = { channelId: item.channelId, messageId: item.channelMessageId };
-  }
+  decision.removeChannelMessages = channelCopies(pack);
   decision.replies.push({
     kind: messageId ? "edit" : "send",
     chatId,
     messageId,
-    text: `已删除「${item.name}」。`,
+    text: `已删除「${pack.name}」。`,
   });
-  return { data: { ...data, items: data.items.filter((entry) => entry.code !== item.code) }, decision };
+  return { data: { ...data, packs: data.packs.filter((entry) => entry.code !== pack.code) }, decision };
 }
 
 function reduceCommand(
@@ -186,30 +215,37 @@ function reduceCommand(
     });
     return { data, decision };
   }
+  if (command.name === "cancel") {
+    const open = openPack(data, user.id);
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      text: open ? "已取消这一组，还没有编号。" : "现在没有还没起名的一组。",
+    });
+    return open ? { data: dropOpen(data, user.id), decision } : { data, decision };
+  }
   if (command.name === "list") {
-    const page = positivePage(command.arg);
-    const owned = ownedItems(data, user.id);
-    const listed = queryItems(owned, "", page, VAULT_LIMITS.userPageSize);
+    const owned = readyPacks(data, user.id);
+    const listed = queryPacks(owned, "", positivePage(command.arg), VAULT_LIMITS.userPageSize);
     decision.replies.push({
       kind: "send",
       chatId,
       text: listText(listed.items, listed.page, listed.pages, listed.total),
-      keyboard: itemKeyboard(listed.items, listed.page, listed.pages),
+      keyboard: packKeyboard(listed.items, listed.page, listed.pages),
     });
     return { data, decision };
   }
   if (command.name === "search") {
     if (!command.arg) {
-      decision.replies.push({ kind: "send", chatId, text: "用法：/search 后面跟上文件名里的词。" });
+      decision.replies.push({ kind: "send", chatId, text: "用法：/search 后面跟上名称里的词。" });
       return { data, decision };
     }
-    const owned = ownedItems(data, user.id);
-    const found = queryItems(owned, command.arg, 1, VAULT_LIMITS.userPageSize);
+    const found = queryPacks(readyPacks(data, user.id), command.arg, 1, VAULT_LIMITS.userPageSize);
     decision.replies.push({
       kind: "send",
       chatId,
       text: searchText(command.arg, found.items, found.total),
-      keyboard: itemKeyboard(found.items, 1, 1),
+      keyboard: packKeyboard(found.items, 1, 1),
     });
     return { data, decision };
   }
@@ -225,14 +261,13 @@ function reduceCommand(
       decision.replies.push({ kind: "send", chatId, text: "用法：/del 后面跟上编号。" });
       return { data, decision };
     }
-    return removeItem(data, decision, chatId, user.id, command.arg);
+    return removePack(data, decision, chatId, user.id, command.arg);
   }
   if (command.name === "stats") {
-    const owned = ownedItems(data, user.id);
     decision.replies.push({
       kind: "send",
       chatId,
-      text: statsText(owned, data.channelTitle || data.channelId),
+      text: statsText(readyPacks(data, user.id), data.channelTitle || data.channelId),
     });
     return { data, decision };
   }
@@ -248,108 +283,177 @@ function reduceIncoming(
 ): { data: VaultData; decision: Decision } {
   const chatId = String(message.chat.id);
   const user = message.from as TgUser;
+  const open = openPack(data, user.id);
   const draft = draftFromMessage(message);
-  if (!draft) {
+  if (open?.status === "naming" && draft?.kind === "text" && draft.text) {
+    return finishPack(data, decision, user.id, draft.text, options);
+  }
+  if (!draft || draft.kind === "text") {
     decision.replies.push({
       kind: "send",
       chatId,
-      text: withHint("这种消息我还存不了。请发文件、图片、视频、语音或文字。", decision),
+      text: withHint(
+        open?.status === "naming"
+          ? "把名称发过来。名称就是一段文字，不要发命令。"
+          : open
+            ? "这一组还没收完。继续发文件，或者点「结束」再起名称。"
+            : "把文件、图片、视频或语音发给我。可以连续发，结束之后再起名称。",
+        decision,
+      ),
+      keyboard: open && open.status !== "naming" ? collectKeyboard : undefined,
     });
     return { data, decision };
   }
-  const duplicate = data.items.find((item) => item.chatId === chatId && item.messageId === message.message_id);
-  if (duplicate) {
-    decision.replies.push(savedReply(chatId, duplicate, data, decision));
+  if (alreadyStored(data, chatId, message.message_id)) {
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      text: open ? collectingText(open.files.length) : "这份已经收过了。",
+      keyboard: open ? collectKeyboard : undefined,
+    });
     return { data, decision };
   }
-  if (data.items.length >= VAULT_LIMITS.maxItems) {
-    decision.replies.push({ kind: "send", chatId, text: "仓库已满。请在网页里删掉一些旧文件。" });
+  if (countFiles(data) >= VAULT_LIMITS.maxFiles) {
+    decision.replies.push({ kind: "send", chatId, text: "仓库已满。请在网页里删掉一些旧的打包。" });
     return { data, decision };
   }
-  const owned = data.items.filter((item) => item.ownerId === String(user.id)).length;
-  if (owned >= VAULT_LIMITS.maxPerUser) {
-    decision.replies.push({ kind: "send", chatId, text: "你保存的太多了。先用 /del 删掉一些再发。" });
+  const ownedReady = readyPacks(data, user.id).length;
+  if (!open && ownedReady >= VAULT_LIMITS.maxPacksPerUser) {
+    decision.replies.push({ kind: "send", chatId, text: "你打包的太多了。先用 /del 删掉一些。" });
     return { data, decision };
   }
-  const item: VaultItem = {
-    code: allocateCode(data.items, options.nextCode),
-    ownerId: String(user.id),
-    ownerName: personName(user),
-    ownerUsername: user.username,
-    botId: data.botId,
+  if (open && open.files.length >= VAULT_LIMITS.maxFilesPerPack) {
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      text: `这一组已经有 ${open.files.length} 个了。点「结束」，再起个名称。`,
+      keyboard: collectKeyboard,
+    });
+    return { data, decision };
+  }
+  const file: VaultFile = {
     kind: draft.kind,
     name: draft.name,
     caption: draft.caption,
-    text: draft.text,
     mime: draft.mime,
     size: draft.size,
     fileId: draft.fileId,
+    botId: data.botId,
     chatId,
     messageId: message.message_id,
-    createdAt: options.now,
   };
+  const pack = open
+    ? { ...open, status: "collecting" as const, files: [...open.files, file] }
+    : {
+        id: `draft:${user.id}`,
+        status: "collecting" as const,
+        ownerId: String(user.id),
+        ownerName: personName(user),
+        ownerUsername: user.username,
+        files: [file],
+        createdAt: options.now,
+      };
   if (data.channelId) {
-    decision.copy = {
-      code: item.code,
-      fromChat: chatId,
-      messageId: message.message_id,
-      toChat: data.channelId,
-    };
+    decision.copy = { fromChat: chatId, messageId: message.message_id, toChat: data.channelId };
   }
-  decision.replies.push(savedReply(chatId, item, data, decision));
-  return { data: { ...data, items: [...data.items, item] }, decision };
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    text: withHint(collectingText(pack.files.length), decision),
+    keyboard: collectKeyboard,
+  });
+  return { data: upsertPack(data, pack), decision };
+}
+
+function askName(data: VaultData, decision: Decision, chatId: string, userId: number) {
+  const open = openPack(data, userId);
+  if (!open || open.files.length === 0) {
+    decision.callbackText = "还没有文件";
+    decision.replies.push({ kind: "send", chatId, text: "还没有文件。先把要存的文件发给我。" });
+    return { data, decision };
+  }
+  const pack: VaultPack = { ...open, status: "naming" };
+  decision.callbackText = "请起个名称";
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    text: `这一组有 ${pack.files.length} 个文件。\n\n把名称发过来，我再生成编号和链接。`,
+    keyboard: [[{ text: "取消这组", callback_data: "z" }]],
+  });
+  return { data: upsertPack(data, pack), decision };
+}
+
+function finishPack(data: VaultData, decision: Decision, userId: number, rawName: string, options: Options) {
+  const open = openPack(data, userId);
+  const chatId = open?.files[0]?.chatId || "";
+  const name = rawName.replace(/\s+/g, " ").trim();
+  if (!open || !chatId) return { data, decision };
+  if (!name) {
+    decision.replies.push({ kind: "send", chatId, text: "名称不能为空。再发一次。" });
+    return { data, decision };
+  }
+  const code = allocateCode(data.packs, options.nextCode);
+  const pack: VaultPack = {
+    ...open,
+    id: code,
+    code,
+    status: "ready",
+    name: name.slice(0, 80),
+    readyAt: options.now,
+  };
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    text: packedText(pack, { username: data.botUsername, shareLinks: data.shareLinks }),
+    keyboard: [
+      [
+        { text: "取回", callback_data: `g:${code}` },
+        { text: "删除", callback_data: `d:${code}` },
+      ],
+    ],
+  });
+  return { data: upsertPack(data, pack), decision };
 }
 
 function deliverCode(data: VaultData, decision: Decision, chatId: string, userId: number, code: string) {
-  const item = data.items.find((entry) => entry.code === code);
-  if (!item || !isVaultCode(code)) {
+  const pack = readyPacks(data).find((entry) => entry.code === code);
+  if (!pack?.code || !isVaultCode(code)) {
     decision.replies.push({ kind: "send", chatId, text: "没有这个编号。" });
     return { data, decision };
   }
-  if (!canRead(data, item, userId)) {
-    decision.replies.push({ kind: "send", chatId, text: "这个编号只有保存它的人能取回。" });
+  if (!canRead(data, pack, userId)) {
+    decision.replies.push({ kind: "send", chatId, text: "这个编号只有打包的人能取回。" });
     return { data, decision };
   }
-  decision.deliver = { chatId, code: item.code };
+  decision.deliver = { chatId, code: pack.code };
   return { data, decision };
 }
 
-function removeItem(data: VaultData, decision: Decision, chatId: string, userId: number, code: string) {
-  const item = data.items.find((entry) => entry.code === code);
-  if (!item) {
+function removePack(data: VaultData, decision: Decision, chatId: string, userId: number, code: string) {
+  const pack = readyPacks(data).find((entry) => entry.code === code);
+  if (!pack) {
     decision.replies.push({ kind: "send", chatId, text: "没有这个编号。" });
     return { data, decision };
   }
-  if (item.ownerId !== String(userId)) {
-    decision.replies.push({ kind: "send", chatId, text: "只能删除自己保存的文件。" });
+  if (pack.ownerId !== String(userId)) {
+    decision.replies.push({ kind: "send", chatId, text: "只能删除自己打包的。" });
     return { data, decision };
   }
-  if (item.channelId && item.channelMessageId) {
-    decision.removeChannelMessage = { channelId: item.channelId, messageId: item.channelMessageId };
-  }
-  decision.replies.push({ kind: "send", chatId, text: `已删除「${item.name}」。` });
-  return { data: { ...data, items: data.items.filter((entry) => entry.code !== code) }, decision };
+  decision.removeChannelMessages = channelCopies(pack);
+  decision.replies.push({ kind: "send", chatId, text: `已删除「${pack.name}」。` });
+  return { data: { ...data, packs: data.packs.filter((entry) => entry.code !== code) }, decision };
 }
 
-function savedReply(chatId: string, item: VaultItem, data: VaultData, decision: Decision): Reply {
-  return {
-    kind: "send",
-    chatId,
-    text: withHint(savedText(item, { username: data.botUsername, shareLinks: data.shareLinks }), decision),
-    keyboard: [
-      [
-        { text: "取回", callback_data: `g:${item.code}` },
-        { text: "删除", callback_data: `d:${item.code}` },
-      ],
-    ],
-  };
+function collectingText(count: number) {
+  return `已收下 ${count} 个，先放在同一组里。\n\n还要继续存入，还是结束？`;
 }
 
-function itemKeyboard(items: VaultItem[], page: number, pages: number) {
-  if (!items.length) return undefined;
-  const rows: InlineButton[][] = items.map((item) => [
-    { text: `取回 ${item.code}`, callback_data: `g:${item.code}` },
-    { text: "删除", callback_data: `d:${item.code}` },
+function packKeyboard(packs: VaultPack[], page: number, pages: number) {
+  const ready = packs.filter((pack) => pack.code);
+  if (!ready.length) return undefined;
+  const rows: InlineButton[][] = ready.map((pack) => [
+    { text: `取回 ${pack.code}`, callback_data: `g:${pack.code}` },
+    { text: "删除", callback_data: `d:${pack.code}` },
   ]);
   const nav: InlineButton[] = [];
   if (page > 1) nav.push({ text: "上一页", callback_data: `l:${page - 1}` });
@@ -359,6 +463,9 @@ function itemKeyboard(items: VaultItem[], page: number, pages: number) {
 }
 
 function parseAction(data: string) {
+  if (data === "c") return { type: "continue" as const };
+  if (data === "e") return { type: "finish" as const };
+  if (data === "z") return { type: "drop" as const };
   if (data === "x") return { type: "cancel" as const };
   const list = /^l:(\d{1,4})$/.exec(data);
   if (list) return { type: "list" as const, page: Number(list[1]) };
@@ -371,12 +478,41 @@ function parseAction(data: string) {
   return null;
 }
 
-function ownedItems(data: VaultData, userId: number) {
-  return data.items.filter((item) => item.ownerId === String(userId));
+function openPack(data: VaultData, userId: number) {
+  return data.packs.find((pack) => pack.ownerId === String(userId) && pack.status !== "ready");
 }
 
-function canRead(data: VaultData, item: VaultItem, userId: number) {
-  return data.shareLinks || item.ownerId === String(userId);
+function readyPacks(data: VaultData, userId?: number) {
+  return data.packs.filter((pack) => pack.status === "ready" && pack.code && (userId === undefined || pack.ownerId === String(userId)));
+}
+
+function dropOpen(data: VaultData, userId: number): VaultData {
+  return { ...data, packs: data.packs.filter((pack) => !(pack.ownerId === String(userId) && pack.status !== "ready")) };
+}
+
+function upsertPack(data: VaultData, pack: VaultPack): VaultData {
+  const rest = data.packs.filter((entry) => entry.id !== pack.id && !(entry.ownerId === pack.ownerId && entry.status !== "ready" && pack.status === "ready"));
+  const withoutOldDraft = data.packs.filter((entry) => entry.ownerId !== pack.ownerId || entry.status === "ready");
+  if (pack.status === "ready") return { ...data, packs: [...withoutOldDraft, pack] };
+  return { ...data, packs: [...rest.filter((entry) => entry.id !== pack.id), pack] };
+}
+
+function alreadyStored(data: VaultData, chatId: string, messageId: number) {
+  return data.packs.some((pack) => pack.files.some((file) => file.chatId === chatId && file.messageId === messageId));
+}
+
+function countFiles(data: VaultData) {
+  return data.packs.reduce((sum, pack) => sum + pack.files.length, 0);
+}
+
+function channelCopies(pack: VaultPack) {
+  return pack.files
+    .filter((file) => file.channelId && file.channelMessageId)
+    .map((file) => ({ channelId: file.channelId as string, messageId: file.channelMessageId as number }));
+}
+
+function canRead(data: VaultData, pack: VaultPack, userId: number) {
+  return data.shareLinks || pack.ownerId === String(userId);
 }
 
 function positivePage(arg: string) {
@@ -386,14 +522,30 @@ function positivePage(arg: string) {
   return page;
 }
 
-function allocateCode(items: VaultItem[], nextCode: () => string) {
-  const used = new Set(items.map((item) => item.code));
+function allocateCode(packs: VaultPack[], nextCode: () => string) {
+  const used = new Set(packs.map((pack) => pack.code).filter((code): code is string => Boolean(code)));
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const code = nextCode();
     if (!isVaultCode(code) || used.has(code)) continue;
     return code;
   }
   throw new Error("生成编号失败");
+}
+
+function queryPacks(packs: VaultPack[], query: string, page: number, pageSize: number) {
+  const listed = queryItems(
+    packs.map((pack) => ({
+      ...pack,
+      name: pack.name || "",
+      code: pack.code || "",
+      text: pack.files.map((file) => [file.name, file.caption].filter(Boolean).join(" ")).join("\n"),
+      createdAt: pack.readyAt || pack.createdAt,
+    })),
+    query,
+    page,
+    pageSize,
+  );
+  return listed;
 }
 
 function remember(data: VaultData, chat: TgChat, seenAt: string): VaultData {

@@ -3,7 +3,7 @@ import { explainBot, type BotClient } from "./bot-client";
 import { retrievalPlan } from "./format";
 import { reduceVault, type Decision } from "./reduce";
 import type { VaultRepository } from "./store";
-import { CODE_ALPHABET, VAULT_LIMITS, type InlineButton, type TgUpdate, type VaultItem } from "./types";
+import { CODE_ALPHABET, VAULT_LIMITS, type InlineButton, type TgUpdate, type VaultFile, type VaultPack } from "./types";
 
 export type VaultIO = {
   copyMessage(fromChat: string, messageId: number, toChat: string): Promise<number>;
@@ -11,7 +11,7 @@ export type VaultIO = {
   editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]): Promise<void>;
   answerCallback(id: string, text?: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
-  deliver(chatId: string, item: VaultItem, currentBotId?: string): Promise<void>;
+  deliver(chatId: string, pack: VaultPack, currentBotId?: string): Promise<void>;
 };
 
 export function randomCode() {
@@ -28,11 +28,18 @@ export function ioFromClient(client: BotClient): VaultIO {
     editMessage: (chatId, messageId, text, keyboard) => client.editMessage(chatId, messageId, text, keyboard),
     answerCallback: (id, text) => client.answerCallback(id, text).then(() => undefined),
     deleteMessage: (chatId, messageId) => client.deleteMessage(chatId, messageId).then(() => undefined),
-    deliver: (chatId, item, currentBotId) => deliverItem(client, chatId, item, currentBotId),
+    deliver: (chatId, pack, currentBotId) => deliverPack(client, chatId, pack, currentBotId),
   };
 }
 
-export async function deliverItem(client: BotClient, chatId: string, item: VaultItem, currentBotId?: string) {
+export async function deliverPack(client: BotClient, chatId: string, pack: VaultPack, currentBotId?: string) {
+  await client.sendMessage(chatId, `「${pack.name || "未命名"}」共 ${pack.files.length} 个`);
+  for (const file of pack.files) {
+    await deliverItem(client, chatId, file, currentBotId);
+  }
+}
+
+export async function deliverItem(client: BotClient, chatId: string, item: VaultFile, currentBotId?: string) {
   const plan = retrievalPlan(item, currentBotId);
   if (plan === "channel" && item.channelId && item.channelMessageId) {
     try {
@@ -102,35 +109,37 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
   if (decision.copy) {
     try {
       const messageId = await io.copyMessage(decision.copy.fromChat, decision.copy.messageId, decision.copy.toChat);
+      const copy = decision.copy;
       await repo.update((current) => ({
         ...current,
-        items: current.items.map((item) =>
-          item.code === decision.copy?.code
-            ? { ...item, channelId: decision.copy.toChat, channelMessageId: messageId }
-            : item,
-        ),
+        packs: current.packs.map((pack) => ({
+          ...pack,
+          files: pack.files.map((file) =>
+            copy && file.chatId === copy.fromChat && file.messageId === copy.messageId
+              ? { ...file, channelId: copy.toChat, channelMessageId: messageId }
+              : file,
+          ),
+        })),
       }));
     } catch (error) {
-      const note = `\n\n还没放进仓库频道：${explainBot(error) || "请检查机器人是不是频道管理员"}。编号可以先用。`;
+      const note = `\n\n还没放进仓库频道：${explainBot(error) || "请检查机器人是不是频道管理员"}。可以先继续打包。`;
       decision.replies = decision.replies.map((reply) => ({ ...reply, text: `${reply.text}${note}` }));
     }
   }
   if (decision.deliver) {
     try {
       const fresh = await repo.load();
-      const item = fresh.items.find((entry) => entry.code === decision.deliver?.code);
-      if (!item) throw new Error("没有这个编号");
-      await io.deliver(decision.deliver.chatId, item, fresh.botId);
+      const pack = fresh.packs.find((entry) => entry.code === decision.deliver?.code && entry.status === "ready");
+      if (!pack) throw new Error("没有这个编号");
+      await io.deliver(decision.deliver.chatId, pack, fresh.botId);
     } catch (error) {
       const message = `取回失败：${explainBot(error) || "请再试一次"}`;
       decision.callbackText = message;
       if (!decision.callbackId) await io.sendMessage(decision.deliver.chatId, message);
     }
   }
-  if (decision.removeChannelMessage) {
-    await io
-      .deleteMessage(decision.removeChannelMessage.channelId, decision.removeChannelMessage.messageId)
-      .catch(() => undefined);
+  for (const message of decision.removeChannelMessages ?? []) {
+    await io.deleteMessage(message.channelId, message.messageId).catch(() => undefined);
   }
   for (const reply of decision.replies) {
     if (reply.kind === "edit" && reply.messageId) {
