@@ -4,6 +4,7 @@ import {
   isVaultCode,
   listText,
   menuAction,
+  packDetailText,
   packedText,
   personName,
   queryItems,
@@ -139,15 +140,14 @@ function reduceCallback(
     return { data, decision };
   }
   if (action.type === "list") {
-    const owned = readyPacks(data, query.from.id);
-    const listed = queryPacks(owned, "", action.page, VAULT_LIMITS.userPageSize);
+    const listed = queryPacks(visiblePacks(data, query.from.id), "", action.page, VAULT_LIMITS.userPageSize);
     decision.callbackText = `第 ${listed.page} 页`;
     decision.replies.push({
       kind: messageId ? "edit" : "send",
       chatId,
       messageId,
-      text: listText(listed.items, listed.page, listed.pages, listed.total),
-      keyboard: packKeyboard(listed.items, listed.page, listed.pages),
+      text: listText(listed.items, listed.page, listed.pages, listed.total, String(query.from.id), data.shareLinks),
+      keyboard: packKeyboard(listed.items, listed.page, listed.pages, String(query.from.id)),
     });
     return { data, decision };
   }
@@ -163,6 +163,21 @@ function reduceCallback(
     }
     decision.callbackText = "已发给你";
     decision.deliver = { chatId, code: pack.code };
+    return { data, decision };
+  }
+  if (action.type === "view") {
+    if (!canRead(data, pack, query.from.id)) {
+      decision.callbackText = "这个文件包只有打包的人能看";
+      return { data, decision };
+    }
+    decision.callbackText = "这是里面的文件";
+    decision.replies.push({
+      kind: messageId ? "edit" : "send",
+      chatId,
+      messageId,
+      text: packDetailText(pack, { username: data.botUsername, shareLinks: data.shareLinks }),
+      keyboard: detailKeyboard(pack, String(query.from.id)),
+    });
     return { data, decision };
   }
   if (pack.ownerId !== String(query.from.id)) {
@@ -284,26 +299,26 @@ function reduceCommand(
 }
 
 function listPacks(data: VaultData, decision: Decision, chatId: string, userId: number, page: number) {
-  const listed = queryPacks(readyPacks(data, userId), "", page, VAULT_LIMITS.userPageSize);
-  const keyboard = packKeyboard(listed.items, listed.page, listed.pages);
+  const listed = queryPacks(visiblePacks(data, userId), "", page, VAULT_LIMITS.userPageSize);
+  const keyboard = packKeyboard(listed.items, listed.page, listed.pages, String(userId));
   decision.replies.push({
     kind: "send",
     chatId,
     menu: !keyboard,
-    text: listText(listed.items, listed.page, listed.pages, listed.total),
+    text: listText(listed.items, listed.page, listed.pages, listed.total, String(userId), data.shareLinks),
     keyboard,
   });
   return { data, decision };
 }
 
 function searchPacks(data: VaultData, decision: Decision, chatId: string, userId: number, query: string) {
-  const found = queryPacks(readyPacks(data, userId), query, 1, VAULT_LIMITS.userPageSize);
-  const keyboard = packKeyboard(found.items, 1, 1);
+  const found = queryPacks(visiblePacks(data, userId), query, 1, VAULT_LIMITS.userPageSize);
+  const keyboard = packKeyboard(found.items, 1, 1, String(userId));
   decision.replies.push({
     kind: "send",
     chatId,
     menu: !keyboard,
-    text: searchText(query, found.items, found.total),
+    text: searchText(query, found.items, found.total, String(userId)),
     keyboard,
   });
   return { data, decision };
@@ -498,18 +513,33 @@ function collectingText(count: number) {
   return `已收下 ${count} 个，先放在同一组里。\n\n还要继续存入，还是结束？`;
 }
 
-function packKeyboard(packs: VaultPack[], page: number, pages: number) {
+function packKeyboard(packs: VaultPack[], page: number, pages: number, viewerId: string) {
   const ready = packs.filter((pack) => pack.code);
   if (!ready.length) return undefined;
-  const rows: InlineButton[][] = ready.map((pack) => [
-    { text: `取回 ${pack.code}`, callback_data: `g:${pack.code}` },
-    { text: "删除", callback_data: `d:${pack.code}` },
-  ]);
+  const rows: InlineButton[][] = ready.map((pack) => {
+    const row: InlineButton[] = [
+      { text: `查看 ${clipName(pack.name)}`, callback_data: `v:${pack.code}` },
+      { text: "取回", callback_data: `g:${pack.code}` },
+    ];
+    if (pack.ownerId === viewerId) row.push({ text: "删除", callback_data: `d:${pack.code}` });
+    return row;
+  });
   const nav: InlineButton[] = [];
   if (page > 1) nav.push({ text: "上一页", callback_data: `l:${page - 1}` });
   if (page < pages) nav.push({ text: "下一页", callback_data: `l:${page + 1}` });
   if (nav.length) rows.push(nav);
   return rows;
+}
+
+function detailKeyboard(pack: VaultPack, viewerId: string) {
+  const row: InlineButton[] = [{ text: "取回这一组", callback_data: `g:${pack.code}` }];
+  if (pack.ownerId === viewerId) row.push({ text: "删除", callback_data: `d:${pack.code}` });
+  return [row, [{ text: "返回文件夹", callback_data: "l:1" }]];
+}
+
+function clipName(name?: string) {
+  const text = (name || "未命名").replace(/\s+/g, " ").trim();
+  return text.length > 12 ? `${text.slice(0, 11)}…` : text;
 }
 
 function parseAction(data: string) {
@@ -521,6 +551,8 @@ function parseAction(data: string) {
   if (list) return { type: "list" as const, page: Number(list[1]) };
   const get = /^g:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
   if (get) return { type: "get" as const, code: get[1] };
+  const view = /^v:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
+  if (view) return { type: "view" as const, code: view[1] };
   const ask = /^d:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
   if (ask) return { type: "ask-delete" as const, code: ask[1] };
   const yes = /^y:([abcdefghjkmnpqrstuvwxyz23456789]{8})$/.exec(data);
@@ -534,6 +566,10 @@ function openPack(data: VaultData, userId: number) {
 
 function readyPacks(data: VaultData, userId?: number) {
   return data.packs.filter((pack) => pack.status === "ready" && pack.code && (userId === undefined || pack.ownerId === String(userId)));
+}
+
+function visiblePacks(data: VaultData, userId: number) {
+  return data.shareLinks ? readyPacks(data) : readyPacks(data, userId);
 }
 
 function dropOpen(data: VaultData, userId: number): VaultData {

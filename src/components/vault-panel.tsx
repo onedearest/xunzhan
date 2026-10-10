@@ -301,7 +301,7 @@ export function VaultPanel({ onClose, homeHref }: { onClose?: () => void; homeHr
                 setShareLinks(checked === true);
               }}
             />
-            <span>允许把编号链接发给别人取回。关掉之后，只有保存的那个人能取。</span>
+            <span>允许别人查看文件包并用链接取回。关掉之后，只有打包的人能在文件夹里看到，也只有本人能取。</span>
           </label>
           {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
           <div className="flex flex-wrap gap-2">

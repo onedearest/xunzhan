@@ -262,6 +262,38 @@ test("menu offers start, store, packed folders, and keyword search", () => {
   assert.equal(found.data.packs.length, 1);
 });
 
+test("other people can browse shared packs and see the files inside", () => {
+  const nextCode = codes();
+  const now = "2026-10-09T00:00:00.000Z";
+  const saved = finishPack(
+    step(baseData(), privateFile(1, 10, "报告.pdf"), now, nextCode).data,
+    "周报",
+    now,
+    nextCode,
+  );
+  const guest = step(saved.data, textMessage(20, 20, "查看文件夹（打包好的）", 8), now, nextCode);
+  assert.match(guest.decision.replies[0]?.text ?? "", /周报/);
+  assert.match(guest.decision.replies[0]?.text ?? "", /报告\.pdf/);
+  const buttons = guest.decision.replies[0]?.keyboard?.flat() ?? [];
+  assert.equal(buttons.some((button) => button.callback_data === "v:abcdefgj"), true);
+  assert.equal(buttons.some((button) => button.callback_data === "g:abcdefgj"), true);
+  assert.equal(buttons.some((button) => button.callback_data === "d:abcdefgj"), false);
+  const detail = step(saved.data, press(21, "v:abcdefgj", 8), now, nextCode);
+  assert.match(detail.decision.replies[0]?.text ?? "", /报告\.pdf/);
+  assert.match(detail.decision.replies[0]?.text ?? "", /2 KB/);
+  const found = step(saved.data, textMessage(22, 22, "/search 报告", 8), now, nextCode);
+  assert.match(found.decision.replies[0]?.text ?? "", /周报/);
+  const hidden = step({ ...saved.data, shareLinks: false }, textMessage(23, 23, "/folders", 8), now, nextCode);
+  assert.doesNotMatch(hidden.decision.replies[0]?.text ?? "", /周报/);
+  assert.match(hidden.decision.replies[0]?.text ?? "", /只显示你自己/);
+  const owner = step({ ...saved.data, shareLinks: false }, textMessage(24, 24, "/folders"), now, nextCode);
+  assert.match(owner.decision.replies[0]?.text ?? "", /周报/);
+  assert.equal(
+    owner.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "d:abcdefgj"),
+    true,
+  );
+});
+
 test("a menu button does not become the folder name", () => {
   const nextCode = codes();
   const now = "2026-10-09T00:00:00.000Z";

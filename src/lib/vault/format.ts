@@ -157,8 +157,8 @@ export function welcomeText(options: { username?: string; shareLinks: boolean; c
     "",
     "开始：看这段说明",
     "存储：把文件发给我，结束之后再起名称",
-    "查看文件夹（打包好的）：打开已经生成编号的那些",
-    "搜索关键词：按名称找文件夹",
+    "查看文件夹（打包好的）：看到有哪些文件包，点「查看」能看里面的文件",
+    "搜索关键词：按名称找文件包",
     "",
     "/get 编号 取回这一组",
     "/del 编号 删除这一组",
@@ -195,20 +195,55 @@ export function packedText(pack: VaultPack, options: { username?: string; shareL
   return lines.join("\n");
 }
 
-export function listText(packs: VaultPack[], page: number, pages: number, total: number) {
-  if (total === 0) return "还没有打包好的文件夹。点「存储」，把文件发过来，结束之后再起名称。";
+export function listText(packs: VaultPack[], page: number, pages: number, total: number, viewerId: string, shared: boolean) {
+  if (total === 0) {
+    return shared
+      ? "还没有打包好的文件夹。点「存储」，把文件发过来，结束之后再起名称。"
+      : "分享已关闭，这里只显示你自己打包的。你还没有文件夹。";
+  }
   const lines = packs.map((pack, index) => {
     const number = (page - 1) * VAULT_LIMITS.userPageSize + index + 1;
-    return `${number}. ${clip(pack.name || "未命名", 40)} · ${pack.files.length} 个 · ${pack.code}`;
+    const mine = pack.ownerId === viewerId;
+    const who = mine ? "" : ` · ${clip(pack.ownerName, 12)}`;
+    return `${number}. ${clip(pack.name || "未命名", 40)}${who}\n   ${filePreview(pack)}`;
   });
-  return [`文件夹，第 ${page}/${pages} 页，共 ${total} 个`, "", ...lines, "", "点下面的按钮取回或删除。"].join("\n");
+  return [`文件包，第 ${page}/${pages} 页，共 ${total} 个`, "", ...lines, "", "点「查看」能看到里面有哪些文件，点「取回」会把这一组发来。"].join("\n");
 }
 
-export function searchText(query: string, packs: VaultPack[], total: number) {
+export function searchText(query: string, packs: VaultPack[], total: number, viewerId: string) {
   if (!packs.length) return `没有找到「${clip(query, 40)}」。`;
-  const lines = packs.map((pack) => `${clip(pack.name || "未命名", 40)} · ${pack.files.length} 个 · ${pack.code}`);
+  const lines = packs.map((pack) => {
+    const who = pack.ownerId === viewerId ? "" : ` · ${clip(pack.ownerName, 12)}`;
+    return `${clip(pack.name || "未命名", 40)}${who}\n   ${filePreview(pack)}`;
+  });
   const more = total > packs.length ? ["", `还有 ${total - packs.length} 个，把词写得更具体一些。`] : [];
-  return [`「${clip(query, 40)}」找到 ${total} 个文件夹`, "", ...lines, ...more].join("\n");
+  return [`「${clip(query, 40)}」找到 ${total} 个文件包`, "", ...lines, ...more].join("\n");
+}
+
+export function packDetailText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
+  const shown = pack.files.slice(0, 40);
+  const files = shown.map((file, index) => {
+    const size = formatSize(file.size);
+    return `${index + 1}. ${clip(file.name, 60)}${size ? ` · ${size}` : ""}`;
+  });
+  const lines = [
+    `「${clip(pack.name || "未命名", 80)}」`,
+    `来自 ${pack.ownerName} · 共 ${pack.files.length} 个文件`,
+    "",
+    ...files,
+  ];
+  if (pack.files.length > shown.length) lines.push(`还有 ${pack.files.length - shown.length} 个，取回时会一起发来。`);
+  lines.push("", `编号：${pack.code}`);
+  if (options.shareLinks && options.username && pack.code) {
+    lines.push(`链接：https://t.me/${options.username}?start=${pack.code}`);
+  }
+  return lines.join("\n");
+}
+
+function filePreview(pack: VaultPack) {
+  const names = pack.files.slice(0, 3).map((file) => clip(file.name, 18));
+  if (!names.length) return "里面还没有文件";
+  return pack.files.length > names.length ? `${names.join("、")} 等 ${pack.files.length} 个` : names.join("、");
 }
 
 export function statsText(packs: VaultPack[], channelTitle?: string) {
