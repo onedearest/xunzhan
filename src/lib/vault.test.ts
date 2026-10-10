@@ -135,8 +135,7 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(first.data.packs[0]?.code, undefined);
   assert.match(first.decision.replies[0]?.text ?? "", /第1个文件/);
   assert.match(first.decision.replies[0]?.text ?? "", /确认/);
-  assert.equal(first.decision.replies[0]?.bar, undefined);
-  assert.equal(first.decision.replies[0]?.armBar, "finish");
+  assert.equal(first.decision.replies[0]?.bar, "finish");
   assert.equal(first.decision.replies[0]?.kind, "send");
 
   const noted = {
@@ -147,8 +146,9 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.equal(second.data.packs.length, 1);
   assert.equal(second.data.packs[0]?.files.length, 2);
   assert.equal(second.data.packs[0]?.status, "collecting");
-  assert.equal(second.decision.replies[0]?.kind, "edit");
-  assert.equal(second.decision.replies[0]?.messageId, 77);
+  assert.equal(second.decision.replies[0]?.kind, "send");
+  assert.equal(second.decision.replies[0]?.bar, "finish");
+  assert.equal(second.decision.replies[0]?.replaceMessageId, 77);
   assert.match(second.decision.replies[0]?.text ?? "", /第2个文件/);
 
   const talking = step(second.data, textMessage(3, 12, "先别起名"), now, nextCode);
@@ -159,24 +159,25 @@ test("keeps files in one group until the user finishes and names it", () => {
   const asked = step(talking.data, press(4, "e"), now, nextCode);
   assert.equal(asked.data.packs[0]?.status, "naming");
   assert.equal(asked.data.packs[0]?.code, undefined);
-  assert.match(asked.decision.replies[0]?.text ?? "", /把名称发过来/);
+  assert.match(asked.decision.replies[0]?.text ?? "", /至少5个字符/);
 
   const extra = step(asked.data, privateFile(5, 13, "附录.pdf"), now, nextCode);
   assert.equal(extra.data.packs[0]?.status, "collecting");
   assert.equal(extra.data.packs[0]?.files.length, 3);
   assert.equal(extra.data.packs[0]?.code, undefined);
 
-  const named = finishPack(extra.data, "周报", now, nextCode, 6);
+  const named = finishPack(extra.data, "周报素材包", now, nextCode, 6);
   const ready = named.data.packs.filter((pack) => pack.status === "ready");
   assert.equal(ready.length, 1);
   assert.equal(named.data.packs.length, 1);
   assert.equal(ready[0]?.code, "abcdefgj");
-  assert.equal(ready[0]?.name, "周报");
+  assert.equal(ready[0]?.name, "周报素材包");
   assert.equal(ready[0]?.files.length, 3);
-  assert.match(named.decision.replies[0]?.text ?? "", /请选择文件夹操作/);
+  assert.match(named.decision.replies[0]?.text ?? "", /文件存储成功/);
   assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "a:abcdefgj"), true);
   assert.match(named.decision.replies[0]?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
-  assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "g:abcdefgj"), true);
+  assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "w:new"), true);
+  assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "h"), true);
 });
 
 test("keeps one collecting notice when more files arrive", async () => {
@@ -217,13 +218,13 @@ test("keeps one collecting notice when more files arrive", async () => {
     await applyVaultUpdate(privateFile(1, 10, "a.pdf"), repo, io, { now, nextCode: codes() });
     await applyVaultUpdate(privateFile(2, 11, "b.pdf"), repo, io, { now, nextCode: codes() });
     const saved = await repo.load();
-    assert.equal(saved.packs[0]?.noticeMessageId, 10);
-    assert.match(edits[0] ?? "", /第2个文件/);
-    assert.equal(edits.length, 1);
-    assert.match(sent[0] ?? "", /^-:已接收你发送的第1个文件/);
-    assert.equal(sent[1], "finish:·");
+    assert.equal(saved.packs[0]?.noticeMessageId, 11);
+    assert.equal(edits.length, 0);
+    assert.match(sent[0] ?? "", /^finish:📁新建文件夹/);
+    assert.match(sent[1] ?? "", /^finish:📁新建文件夹/);
+    assert.match(sent[1] ?? "", /第2个文件/);
     assert.equal(sent.length, 2);
-    assert.deepEqual(deleted, [11]);
+    assert.deepEqual(deleted, [10]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -253,13 +254,15 @@ test("pages stored files by tens and finishes from the bottom button", () => {
     ],
   });
   const added = step(data, privateFile(11, 11, "素材11.pdf"), now, nextCode);
-  assert.equal(added.decision.replies[0]?.kind, "edit");
+  assert.equal(added.decision.replies[0]?.kind, "send");
+  assert.equal(added.decision.replies[0]?.replaceMessageId, 50);
+  assert.equal(added.decision.replies[0]?.bar, "finish");
   assert.match(added.decision.replies[0]?.text ?? "", /第11个文件/);
   assert.doesNotMatch(added.decision.replies[0]?.text ?? "", /素材1\.pdf/);
   const ended = step(added.data, textMessage(13, 13, "✅确认"), now, nextCode);
   assert.equal(ended.data.packs[0]?.status, "naming");
   assert.equal(ended.decision.replies[0]?.menu, true);
-  assert.match(ended.decision.replies[0]?.text ?? "", /把名称发过来/);
+  assert.match(ended.decision.replies[0]?.text ?? "", /请输入文件夹名称/);
 
   const ready = {
     ...added.data.packs[0]!,
@@ -280,7 +283,7 @@ test("pages stored files by tens and finishes from the bottom button", () => {
 test("replies to a code in a group with a button and marks it for deletion", () => {
   const nextCode = codes();
   const now = "2026-10-09T00:00:00.000Z";
-  const saved = finishPack(step(baseData(), privateFile(1, 10), now, nextCode).data, "周报", now, nextCode);
+  const saved = finishPack(step(baseData(), privateFile(1, 10), now, nextCode).data, "周报素材包", now, nextCode);
   const group = step(
     saved.data,
     update({
@@ -346,7 +349,7 @@ test("keeps each person's packs private when sharing is off", () => {
   const nextCode = codes();
   const saved = finishPack(
     step(baseData({ shareLinks: false }), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode).data,
-    "周报",
+    "周报素材包",
     "2026-10-09T00:00:00.000Z",
     nextCode,
   );
@@ -366,7 +369,7 @@ test("lets a shared link retrieve the whole pack and only the owner delete it", 
   const nextCode = codes();
   const saved = finishPack(
     step(baseData(), privateFile(1, 10), "2026-10-09T00:00:00.000Z", nextCode).data,
-    "周报",
+    "周报素材包",
     "2026-10-09T00:00:00.000Z",
     nextCode,
   );
@@ -385,7 +388,7 @@ test("pages ready packs and searches by the pack name", () => {
   const nextCode = codes();
   for (let index = 0; index < 6; index += 1) {
     const collected = step(data, privateFile(index + 1, index + 1, `文件${index}.pdf`), `2026-10-09T00:0${index}:00.000Z`, nextCode);
-    const named = finishPack(collected.data, `笔记${index}`, `2026-10-09T00:0${index}:00.000Z`, nextCode, 100 + index * 2);
+    const named = finishPack(collected.data, `笔记素材${index}`, `2026-10-09T00:0${index}:00.000Z`, nextCode, 100 + index * 2);
     data = named.data;
   }
   assert.equal(data.packs.filter((pack) => pack.status === "ready").length, 6);
@@ -397,23 +400,34 @@ test("pages ready packs and searches by the pack name", () => {
   assert.doesNotMatch(found.decision.replies[0]?.text ?? "", /笔记2/);
 });
 
-test("menu offers start, store, packed folders, and keyword search", () => {
+test("menu offers home, store, get, and folder management", () => {
   assert.deepEqual(
-    botCommands.slice(0, 4).map((item) => item.description),
-    [MENU.start, MENU.store, MENU.folders, MENU.search],
+    botCommands.map((item) => [item.command, item.description]),
+    [
+      ["start", MENU.home],
+      ["put", MENU.store],
+      ["get", MENU.get],
+      ["folder", MENU.folders],
+    ],
   );
   const nextCode = codes();
   const now = "2026-10-09T00:00:00.000Z";
-  const started = step(baseData(), textMessage(1, 1, "开始"), now, nextCode);
+  const started = step(baseData(), textMessage(1, 1, "🏠首页"), now, nextCode);
   assert.equal(started.decision.replies[0]?.menu, true);
-  assert.match(started.decision.replies[0]?.text ?? "", /查看文件夹（打包好的）/);
+  assert.match(started.decision.replies[0]?.text ?? "", /管理文件夹/);
 
-  const stored = step(baseData(), textMessage(2, 2, "存储"), now, nextCode);
-  assert.match(stored.decision.replies[0]?.text ?? "", /确认/);
+  const stored = step(baseData(), textMessage(2, 2, "📩存储"), now, nextCode);
+  assert.match(stored.decision.replies[0]?.text ?? "", /选择存储方式/);
+  assert.equal(stored.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "w:new");
   assert.equal(stored.data.packs.length, 0);
+  const opened = step(stored.data, press(3, "w:new"), now, nextCode);
+  assert.equal(opened.data.packs[0]?.status, "collecting");
+  assert.equal(opened.data.packs[0]?.files.length, 0);
+  assert.equal(opened.decision.replies[0]?.bar, "finish");
+  assert.match(opened.decision.replies[0]?.text ?? "", /请发送你要存储的文件/);
 
   const collecting = step(baseData(), privateFile(3, 3), now, nextCode);
-  const named = finishPack(collecting.data, "周报", now, nextCode, 4);
+  const named = finishPack(collecting.data, "周报素材包", now, nextCode, 4);
   const folders = step(named.data, textMessage(8, 8, "查看文件夹（打包好的）"), now, nextCode);
   assert.match(folders.decision.replies[0]?.text ?? "", /周报/);
   assert.equal(folders.data.packs[0]?.status, "ready");
@@ -432,7 +446,7 @@ test("other people can browse shared packs and see the files inside", () => {
   const now = "2026-10-09T00:00:00.000Z";
   const saved = finishPack(
     step(baseData(), privateFile(1, 10, "报告.pdf"), now, nextCode).data,
-    "周报",
+    "周报素材包",
     now,
     nextCode,
   );
@@ -474,7 +488,7 @@ test("a menu button does not become the folder name", () => {
 test("appends files to a folder and renames it", () => {
   const nextCode = codes();
   const now = "2026-10-09T00:00:00.000Z";
-  const named = finishPack(step(baseData(), privateFile(1, 10, "报告.pdf"), now, nextCode).data, "周报", now, nextCode, 6);
+  const named = finishPack(step(baseData(), privateFile(1, 10, "报告.pdf"), now, nextCode).data, "周报素材包", now, nextCode, 6);
   const adding = step(named.data, press(7, "a:abcdefgj"), now, nextCode);
   assert.equal(adding.data.packs[0]?.status, "collecting");
   assert.equal(adding.data.packs[0]?.code, "abcdefgj");
@@ -492,8 +506,8 @@ test("appends files to a folder and renames it", () => {
   assert.match(kept.decision.replies[0]?.text ?? "", /文件数：2/);
   const renaming = step(kept.data, press(13, "n:abcdefgj"), now, nextCode);
   assert.equal(renaming.data.prompts[0]?.kind, "rename");
-  const renamed = step(renaming.data, textMessage(14, 24, "月报"), now, nextCode);
-  assert.equal(renamed.data.packs[0]?.name, "月报");
+  const renamed = step(renaming.data, textMessage(14, 24, "月报素材包"), now, nextCode);
+  assert.equal(renamed.data.packs[0]?.name, "月报素材包");
   assert.equal(renamed.data.prompts.length, 0);
   assert.match(renamed.decision.replies[0]?.text ?? "", /月报/);
 });

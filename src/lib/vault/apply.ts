@@ -13,7 +13,7 @@ export type VaultIO = {
     keyboard?: InlineButton[][],
     menu?: boolean,
     bar?: "finish",
-    replyTo?: { messageId?: number; threadId?: number },
+    replyTo?: { messageId?: number; threadId?: number; quiet?: boolean },
   ): Promise<number | void>;
   editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]): Promise<void>;
   answerCallback(id: string, text?: string): Promise<void>;
@@ -154,6 +154,7 @@ function sendReply(io: VaultIO, reply: Reply) {
   return io.sendMessage(reply.chatId, reply.text, reply.keyboard, reply.menu, reply.bar, {
     messageId: reply.replyToMessageId,
     threadId: reply.messageThreadId,
+    quiet: reply.quiet,
   });
 }
 
@@ -195,6 +196,9 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
   }
   for (const reply of decision.replies) {
     let sent: number | void;
+    if (reply.replaceMessageId) {
+      await io.deleteMessage(reply.chatId, reply.replaceMessageId).catch(() => undefined);
+    }
     if (reply.kind === "edit" && reply.messageId) {
       try {
         await io.editMessage(reply.chatId, reply.messageId, reply.text, reply.keyboard);

@@ -124,17 +124,16 @@ function fileDraft(kind: VaultKind, name: string, file: { file_id: string; file_
 }
 
 export const MENU = {
-  start: "开始",
-  store: "存储",
-  folders: "查看文件夹（打包好的）",
-  search: "搜索关键词",
+  home: "🏠首页",
+  get: "📩获取",
+  store: "📩存储",
+  folders: "📚管理文件夹",
 } as const;
 
 export function menuKeyboard() {
   return [
-    [{ text: MENU.start }, { text: MENU.store }],
-    [{ text: MENU.folders }],
-    [{ text: MENU.search }],
+    [{ text: MENU.get }, { text: MENU.home }],
+    [{ text: MENU.store }, { text: MENU.folders }],
   ];
 }
 
@@ -149,10 +148,13 @@ export function collectingBar() {
 
 export function menuAction(text: string) {
   const value = text.trim();
-  if (value === MENU.start) return "start" as const;
-  if (value === MENU.store) return "store" as const;
-  if (value === MENU.folders || value === "查看文件夹") return "folders" as const;
-  if (value === MENU.search) return "search" as const;
+  if (value === MENU.home || value === "首页" || value === "开始") return "start" as const;
+  if (value === MENU.store || value === "存储") return "store" as const;
+  if (value === MENU.get || value === "获取") return "get" as const;
+  if (value === MENU.folders || value === "管理文件夹" || value === "查看文件夹" || value === "查看文件夹（打包好的）") {
+    return "folders" as const;
+  }
+  if (value === "搜索关键词") return "search" as const;
   if (value === COLLECT.confirm || value === "确认" || value === "结束") return "finish" as const;
   if (value === COLLECT.cancel || value === "取消并退出") return "cancel" as const;
   if (value === "上一页") return "page-prev" as const;
@@ -168,7 +170,58 @@ export function filePage<T>(items: T[], requested?: number) {
 }
 
 export function collectingText(count: number) {
-  return [`已接收你发送的第${count}个文件`, "", "你可以继续发送文件，或点击底部菜单 ✅确认 完成存储"].join("\n");
+  return receiveText(count, "new");
+}
+
+export function storeChoiceText() {
+  return [
+    "📁选择存储方式",
+    "· 新建文件夹：上传后输入文件夹名称",
+    "· 继续添加：追加到最近一次文件夹（7天内有效）",
+    "",
+    "👇请选择：",
+  ].join("\n");
+}
+
+export function receiveText(count: number, mode: "new" | "add") {
+  const lines = [
+    mode === "add" ? "📩继续添加到当前文件夹：" : "📁新建文件夹：",
+    "📩 请发送你要存储的文件",
+  ];
+  if (count > 0) lines.push("", `已接收你发送的第${count}个文件`);
+  lines.push("", "💡 可以分多次发送多个文件作为一组一起存储，完成后点击 ✅确认 进行存储");
+  return lines.join("\n");
+}
+
+export function nameAskText() {
+  return ["📝 请输入文件夹名称（至少5个字符）", "", "‼️ 温馨提示：", "◆ 请勿随意填写名称！否则将被封禁！"].join("\n");
+}
+
+export function cleanName(raw: string) {
+  return raw.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter(Boolean).join("\n").slice(0, 200);
+}
+
+export function nameProblem(name: string) {
+  if (!name) return "名称不能为空。再发一次。";
+  if ([...name.replace(/\n/g, "")].length < 5) return "名称至少 5 个字符。再发一次。";
+  return "";
+}
+
+export function savedText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
+  const lines = [
+    "✅ 文件存储成功！",
+    "",
+    `📁 文件夹名称：${pack.name}`,
+    "",
+    `📦 数量：${pack.files.length}`,
+    `🔑 口令：${pack.code}`,
+  ];
+  if (options.shareLinks && options.username && pack.code) {
+    lines.push(`🔗 分享链接：https://t.me/${options.username}?start=${pack.code}`);
+  } else {
+    lines.push("分享已关闭，只有你自己能取回。");
+  }
+  return lines.join("\n");
 }
 
 export function storeText(open?: { status: "collecting" | "naming"; count: number }) {
@@ -187,12 +240,12 @@ export function searchAskText() {
 
 export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean }) {
   const lines = [
-    "用下面的菜单就行。",
+    "用底部的四个按钮就行。",
     "",
-    "开始：看这段说明",
-    "存储：把文件发给我，点 ✅确认 之后再起名称",
-    "查看文件夹（打包好的）：看到有哪些文件包，点「查看」能看里面的文件",
-    "搜索关键词：按名称找文件包",
+    "🏠首页：看这段说明",
+    "📩存储：把文件发过来。底部会换成「取消并退出」和「确认」",
+    "📩获取：按编号取回",
+    "📚管理文件夹：看已经打包的，自己的可以追加文件、改名称",
     "",
     "/get 编号 取回这一组",
     "/del 编号 删除这一组",

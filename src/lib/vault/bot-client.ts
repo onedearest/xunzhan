@@ -62,15 +62,10 @@ const fileMethod: Record<Exclude<VaultKind, "text">, { method: string; field: st
 };
 
 export const botCommands = [
-  { command: "start", description: "开始" },
-  { command: "store", description: "存储" },
-  { command: "folders", description: "查看文件夹（打包好的）" },
-  { command: "search", description: "搜索关键词" },
-  { command: "get", description: "按编号取回这一组" },
-  { command: "del", description: "删除这一组" },
-  { command: "cancel", description: "取消还没起名的一组" },
-  { command: "stats", description: "查看用量" },
-  { command: "help", description: "查看用法" },
+  { command: "start", description: "🏠首页" },
+  { command: "put", description: "📩存储" },
+  { command: "get", description: "📩获取" },
+  { command: "folder", description: "📚管理文件夹" },
 ];
 
 export function canPostInChannel(member: Member) {
@@ -158,11 +153,12 @@ export class BotClient {
     keyboard?: InlineButton[][],
     menu?: boolean,
     bar?: "finish",
-    replyTo?: { messageId?: number; threadId?: number },
+    replyTo?: { messageId?: number; threadId?: number; quiet?: boolean },
   ) {
     const result = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text: text.slice(0, 4096),
+      disable_notification: replyTo?.quiet || undefined,
       message_thread_id: replyTo?.threadId,
       reply_parameters: replyTo?.messageId
         ? { message_id: replyTo.messageId, allow_sending_without_reply: true }
