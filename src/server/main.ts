@@ -19,11 +19,6 @@ import { GET as getJobRoute } from "../app/api/jobs/[id]/route";
 import { POST as stopJobRoute } from "../app/api/jobs/[id]/stop/route";
 import { GET as listJobsRoute, POST as createJobRoute } from "../app/api/jobs/route";
 import { PUT as saveSettings } from "../app/api/settings/route";
-import { POST as forgetVault } from "../app/api/vault/forget/route";
-import { DELETE as deleteVaultItem } from "../app/api/vault/items/[code]/route";
-import { POST as pauseVault } from "../app/api/vault/pause/route";
-import { GET as vaultState, PUT as connectVaultRoute } from "../app/api/vault/route";
-import { resumeVault } from "../lib/vault/service";
 
 const port = Number(process.env.XUNZHAN_PORT || 43731);
 const uiRoot = path.resolve(process.env.XUNZHAN_UI || path.join(__dirname, "ui"));
@@ -51,14 +46,6 @@ async function dispatch(request: Request): Promise<Response | null> {
   if (pathname === "/api/bootstrap" && method === "GET") return bootstrap();
   if (pathname === "/api/demo" && method === "POST") return setDemo(request);
   if (pathname === "/api/settings" && method === "PUT") return saveSettings(request);
-  if (pathname === "/api/vault" && method === "GET") return vaultState(request);
-  if (pathname === "/api/vault" && method === "PUT") return connectVaultRoute(request);
-  if (pathname === "/api/vault/pause" && method === "POST") return pauseVault();
-  if (pathname === "/api/vault/forget" && method === "POST") return forgetVault();
-  const vaultItem = pathname.match(/^\/api\/vault\/items\/([^/]+)$/);
-  if (vaultItem && method === "DELETE") {
-    return deleteVaultItem(request, { params: Promise.resolve({ code: vaultItem[1] }) });
-  }
   if (pathname === "/api/auth/start" && method === "POST") return startLogin(request);
   if (pathname === "/api/auth/qr" && method === "POST") return startQrLogin();
   if (pathname === "/api/auth/qr" && method === "GET") return pollQrLogin(request);
@@ -164,5 +151,4 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`讯栈已在 http://127.0.0.1:${port}`);
-  void resumeVault();
 });

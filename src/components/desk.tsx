@@ -13,7 +13,6 @@ import {
   Square,
 } from "lucide-react";
 import { toast } from "sonner";
-import { VaultPanel } from "@/components/vault-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,7 +20,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -47,7 +45,7 @@ import type {
   SettingsView,
 } from "@/lib/types";
 
-type DeskMode = "chat" | "send" | "browse";
+type DeskMode = "chat" | "send";
 
 type ChatState = {
   status: "loading" | "ready" | "error";
@@ -123,18 +121,15 @@ export function Desk() {
   const [intervalSec, setIntervalSec] = useState(LIMITS.minIntervalSec);
   const [scheduledLocal, setScheduledLocal] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  const [mode, setMode] = useState<DeskMode>("chat");
-  const [browseId, setBrowseId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [history, setHistory] = useState<Job[]>([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
   const [leavingId, setLeavingId] = useState<string | null>(null);
-  const [vaultOpen, setVaultOpen] = useState(false);
   const previousJob = useRef<string | null>(null);
 
   const applyBootstrap = useCallback((data: Bootstrap) => {
@@ -244,17 +239,17 @@ export function Desk() {
   const active = accounts.find((account) => account.id === activeId) ?? null;
   const chatState = activeId ? chats[activeId] : undefined;
   const visibleChats = useMemo(() => {
-    const list = (chatState?.chats ?? []).filter((chat) => {
-      if (mode === "browse") return chat.kind === "channel";
-      if (mode === "send") return chat.kind !== "private";
-      return true;
-    });
+    const list = chatState?.chats ?? [];
     const needle = query.trim().toLowerCase();
     if (!needle) return list;
     return list.filter((chat) =>
       `${chat.title} ${chat.username ?? ""}`.toLowerCase().includes(needle),
     );
-  }, [chatState, query, mode]);
+  }, [chatState, query]);
+  const batchChats = useMemo(
+    () => (chatState?.chats ?? []).filter((chat) => chat.kind !== "private"),
+    [chatState],
+  );
 
   const selectedAccounts = accounts.filter((account) => (selected[account.id]?.length ?? 0) > 0);
   const selectedCount = selectedAccounts.reduce(
@@ -265,14 +260,11 @@ export function Desk() {
     selectedAccounts.length > 0 && selectedAccounts.every((account) => account.demo);
   const minInterval = demoOnly ? LIMITS.demoMinIntervalSec : LIMITS.minIntervalSec;
   const running = job?.status === "running" || job?.status === "scheduled";
-  const browseChat =
-    mode === "browse" && activeId
-      ? (chatState?.chats.find((chat) => chat.id === browseId && chat.kind === "channel") ?? null)
-      : null;
-  const openChat =
-    mode === "chat" && activeId
-      ? (chatState?.chats.find((chat) => chat.id === openId) ?? null)
-      : null;
+  const openChat = activeId
+    ? (chatState?.chats.find((chat) => chat.id === openId) ?? null)
+    : null;
+  const seenTick =
+    job?.deliveries.filter((item) => item.chatId === openId && item.status === "ok").length ?? 0;
 
   useEffect(() => {
     if (intervalSec < minInterval) setIntervalSec(minInterval);
@@ -286,12 +278,6 @@ export function Desk() {
         : [...list, chatId];
       return { ...current, [accountId]: next };
     });
-  }
-
-  function selectVisible() {
-    if (!activeId) return;
-    const ids = visibleChats.filter((chat) => chat.canPost).map((chat) => chat.id);
-    setSelected((current) => ({ ...current, [activeId]: ids }));
   }
 
   async function enableDemo(enabled: boolean) {
@@ -419,16 +405,9 @@ export function Desk() {
         setNavOpen(false);
         setLeavingId(null);
         setOpenId(null);
-        setBrowseId(null);
       }}
       onAdd={openAdd}
-      onSettings={() => setSettingsOpen(true)}
       onDemo={() => void enableDemo(!settings.demo)}
-      vaultOpen={vaultOpen}
-      onVault={() => {
-        setVaultOpen(true);
-        setNavOpen(false);
-      }}
     />
   );
 
@@ -450,22 +429,24 @@ export function Desk() {
         </SheetContent>
       </Sheet>
 
-      {vaultOpen ? (
-        <VaultPanel onClose={() => setVaultOpen(false)} />
-      ) : accounts.length === 0 ? (
-        <Onboarding
-          demoBusy={demoBusy}
-          onOpenNav={() => setNavOpen(true)}
-          onAdd={openAdd}
-          onDemo={() => void enableDemo(true)}
-          onVault={() => {
-            setVaultOpen(true);
-            setNavOpen(false);
+      {accounts.length === 0 ? (
+        <LoginDialog
+          embedded
+          open
+          onOpenChange={() => undefined}
+          onReady={(account) => {
+            setAccounts((current) => [account, ...current.filter((item) => item.id !== account.id)]);
+            setActiveId(account.id);
+            toast.success(`已登录 ${account.name}`);
           }}
+          demoBusy={demoBusy}
+          onDemo={() => void enableDemo(true)}
         />
       ) : (
-        <div className="grid min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]">
-          <section className="flex min-h-0 flex-col lg:border-r lg:border-border">
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <section
+            className={`${openChat ? "hidden lg:flex" : "flex"} min-h-0 w-full flex-col lg:w-[320px] lg:shrink-0 lg:border-r lg:border-border`}
+          >
             <header className="flex items-center gap-3 border-b border-border px-4 py-3 lg:px-6">
               <Button
                 variant="outline"
@@ -506,111 +487,120 @@ export function Desk() {
               ) : null}
             </header>
 
-            <div className="space-y-2 border-b border-border px-4 py-3 lg:px-6">
-              <div className="flex items-center gap-2">
-              <div className="flex shrink-0 rounded-lg border border-border p-0.5">
-                <button
-                  type="button"
-                  className={`rounded-md px-2.5 py-1 text-xs ${mode === "chat" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-                  onClick={() => setMode("chat")}
-                >
-                  聊天
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-md px-2.5 py-1 text-xs ${mode === "send" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-                  onClick={() => setMode("send")}
-                >
-                  群发
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-md px-2.5 py-1 text-xs ${mode === "browse" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-                  onClick={() => setMode("browse")}
-                >
-                  浏览
-                </button>
-              </div>
-              <div className="relative min-w-0 flex-1">
+            <div className="border-b border-border px-4 py-3 lg:px-4">
+              <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={mode === "browse" ? "搜索频道" : mode === "chat" ? "搜索会话" : "搜索群名或用户名"}
+                  placeholder="搜索会话"
                   className="h-9 pl-8"
-                  aria-label={mode === "browse" ? "搜索频道" : mode === "chat" ? "搜索会话" : "搜索群"}
+                  aria-label="搜索会话"
                 />
               </div>
-              </div>
-              {mode === "send" ? (
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={selectVisible}>
-                    全选可发
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => activeId && setSelected((current) => ({ ...current, [activeId]: [] }))}
-                  >
-                    清空
-                  </Button>
-                </div>
-              ) : null}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 lg:px-4">
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
               <ChatList
-                mode={mode}
+                mode="chat"
                 state={chatState}
                 chats={visibleChats}
-                selected={activeId ? (selected[activeId] ?? []) : []}
-                browsingId={mode === "chat" ? (openChat?.id ?? null) : (browseChat?.id ?? null)}
-                job={job}
+                selected={[]}
+                browsingId={openChat?.id ?? null}
+                job={null}
                 accountId={activeId}
-                onToggle={(chatId) => activeId && toggleChat(activeId, chatId)}
-                onBrowse={mode === "chat" ? setOpenId : setBrowseId}
+                onToggle={() => undefined}
+                onBrowse={setOpenId}
                 onRetry={() => activeId && void loadChats(activeId)}
               />
             </div>
           </section>
 
-          {mode === "chat" ? (
-            <Thread accountId={activeId} chat={openChat} />
-          ) : mode === "browse" ? (
-            <Reader accountId={activeId} chat={browseChat} />
-          ) : (
-            <Composer
-              message={message}
-              intervalSec={intervalSec}
-              minInterval={minInterval}
-              confirmed={confirmed}
-              selectedCount={selectedCount}
-              accountCount={selectedAccounts.length}
-              scheduledLocal={scheduledLocal}
-              estimate={queueLabel(selectedCount, intervalSec, Boolean(scheduledLocal))}
-              running={running}
-              sending={sending}
-              job={job}
-              history={history}
-              onMessage={setMessage}
-              onInterval={setIntervalSec}
-              onScheduled={setScheduledLocal}
-              onConfirmed={setConfirmed}
-              onSend={() => void send()}
-              onStop={() => void stop()}
-              onClearJob={() => setJob(null)}
-              onOpenJob={setJob}
-            />
-          )}
+          <Thread
+            accountId={activeId}
+            chat={openChat}
+            seenTick={seenTick}
+            onBack={() => setOpenId(null)}
+            onBatch={() => setBatchOpen(true)}
+          />
         </div>
       )}
 
-      <SettingsDialog
-        open={settingsOpen}
-        settings={settings}
-        onOpenChange={setSettingsOpen}
-        onSaved={setSettings}
-      />
+      <Dialog open={batchOpen} onOpenChange={setBatchOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>群发</DialogTitle>
+            <DialogDescription>
+              只发已经加入、并且允许发言的群。发出去之后，点开那个群，消息还在会话里。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!activeId) return;
+                const ids = batchChats.filter((chat) => chat.canPost).map((chat) => chat.id);
+                setSelected((current) => ({ ...current, [activeId]: ids }));
+              }}
+            >
+              全选可发
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => activeId && setSelected((current) => ({ ...current, [activeId]: [] }))}
+            >
+              清空
+            </Button>
+          </div>
+          <div className="max-h-52 overflow-y-auto rounded-lg border border-border">
+            <ChatList
+              mode="send"
+              state={chatState}
+              chats={batchChats}
+              selected={activeId ? (selected[activeId] ?? []) : []}
+              browsingId={null}
+              job={job}
+              accountId={activeId}
+              onToggle={(chatId) => activeId && toggleChat(activeId, chatId)}
+              onBrowse={(chatId) => {
+                setOpenId(chatId);
+                setBatchOpen(false);
+              }}
+              onRetry={() => activeId && void loadChats(activeId)}
+            />
+          </div>
+          <Composer
+            compact
+            message={message}
+            intervalSec={intervalSec}
+            minInterval={minInterval}
+            confirmed={confirmed}
+            selectedCount={selectedCount}
+            accountCount={selectedAccounts.length}
+            scheduledLocal={scheduledLocal}
+            estimate={queueLabel(selectedCount, intervalSec, Boolean(scheduledLocal))}
+            running={running}
+            sending={sending}
+            job={job}
+            history={history}
+            onMessage={setMessage}
+            onInterval={setIntervalSec}
+            onScheduled={setScheduledLocal}
+            onConfirmed={setConfirmed}
+            onSend={() => void send()}
+            onStop={() => void stop()}
+            onClearJob={() => setJob(null)}
+            onOpenJob={(item) => {
+              const sent = item.deliveries.find((delivery) => delivery.status === "ok");
+              if (sent && sent.accountId === activeId) setOpenId(sent.chatId);
+              setJob(item);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
       <LoginDialog
         open={loginOpen}
         onOpenChange={setLoginOpen}
@@ -638,24 +628,18 @@ function AccountRail({
   selected,
   demo,
   demoBusy,
-  vaultOpen,
   onSelect,
   onAdd,
-  onSettings,
   onDemo,
-  onVault,
 }: {
   accounts: AccountPublic[];
   activeId: string | null;
   selected: Record<string, string[]>;
   demo: boolean;
   demoBusy: boolean;
-  vaultOpen: boolean;
   onSelect: (id: string) => void;
   onAdd: () => void;
-  onSettings: () => void;
   onDemo: () => void;
-  onVault: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -705,15 +689,9 @@ function AccountRail({
         )}
       </div>
       <div className="shrink-0 space-y-2 border-t border-sidebar-border p-3">
-        <Button variant={vaultOpen ? "secondary" : "outline"} className="h-9 w-full" onClick={onVault}>
-          存储机器人
-        </Button>
         <Button className="h-9 w-full" onClick={onAdd}>
           <Plus />
           登录账号
-        </Button>
-        <Button variant="ghost" className="w-full" onClick={onSettings}>
-          登录设置
         </Button>
         <Button
           variant="ghost"
@@ -791,13 +769,13 @@ function ChatList({
     return (
       <div className="grid min-h-64 place-items-center px-6 text-center">
         <p className="text-sm text-muted-foreground">
-          {mode === "browse" ? "没有可浏览的频道" : mode === "chat" ? "没有匹配的会话" : "没有匹配的群"}
+          {mode === "chat" ? "没有匹配的会话" : "没有匹配的群"}
         </p>
       </div>
     );
   }
 
-  if (mode === "browse" || mode === "chat") {
+  if (mode === "chat") {
     return (
       <ul className="space-y-1">
         {chats.map((chat) => {
@@ -888,11 +866,29 @@ function DeliveryBadge({ status }: { status: Job["deliveries"][number]["status"]
   return <Badge variant="outline">排队</Badge>;
 }
 
-function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPublic | null }) {
+function Thread({
+  accountId,
+  chat,
+  seenTick,
+  onBack,
+  onBatch,
+}: {
+  accountId: string | null;
+  chat: ChatPublic | null;
+  seenTick: number;
+  onBack: () => void;
+  onBatch: () => void;
+}) {
   const scroller = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
+  const direction = useRef<1 | -1>(1);
   const [reloadToken, setReloadToken] = useState(0);
   const [sending, setSending] = useState(false);
+  const [autoState, setAutoState] = useState({ key: "", on: false });
+  const auto = chat !== null && autoState.key === chat.id && autoState.on;
+  function setAuto(on: boolean) {
+    setAutoState({ key: chat?.id ?? "", on });
+  }
   const chatKey = accountId && chat ? `${accountId}:${chat.id}:${reloadToken}` : "";
   const [draftState, setDraftState] = useState({ key: "", text: "" });
   const draft = draftState.key === chatKey ? draftState.text : "";
@@ -932,7 +928,7 @@ function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPubli
           currentSession.key === chatKey
             ? {
                 ...currentSession,
-                posts: [],
+                posts: currentSession.posts,
                 status: "error",
                 error: reason instanceof Error ? reason.message : "消息没有加载出来",
               }
@@ -945,6 +941,53 @@ function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPubli
   }, [accountId, chat, chatKey]);
 
   useEffect(() => {
+    if (!seenTick || !accountId || !chat) return;
+    const current = ++requestId.current;
+    void api<{ posts: PostPublic[] }>(
+      `/api/accounts/${encodeURIComponent(accountId)}/messages?chatId=${encodeURIComponent(chat.id)}`,
+    )
+      .then((data) => {
+        if (current !== requestId.current) return;
+        setSession((currentSession) => ({
+          ...currentSession,
+          key: chatKey,
+          posts: data.posts,
+          status: "ready",
+          error: null,
+        }));
+      })
+      .catch(() => undefined);
+  }, [seenTick, accountId, chat, chatKey]);
+
+  useEffect(() => {
+    if (!auto) return;
+    let frame = 0;
+    let last = performance.now();
+    const step = (now: number) => {
+      const el = scroller.current;
+      const delta = ((now - last) / 1000) * 72;
+      last = now;
+      if (el) {
+        const max = el.scrollHeight - el.clientHeight;
+        if (max > 4) {
+          let next = el.scrollTop + delta * direction.current;
+          if (next >= max) {
+            next = max;
+            direction.current = -1;
+          } else if (next <= 0) {
+            next = 0;
+            direction.current = 1;
+          }
+          el.scrollTop = next;
+        }
+      }
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [auto]);
+
+  useEffect(() => {
     const el = scroller.current;
     if (el && view.status === "ready") el.scrollTop = el.scrollHeight;
   }, [view.status, view.posts, chatKey]);
@@ -955,22 +998,37 @@ function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPubli
     if (!accountId || !chat || !draft.trim() || sending) return;
     setSending(true);
     try {
+      const text = draft.trim();
       await api(`/api/accounts/${encodeURIComponent(accountId)}/messages`, {
         method: "POST",
-        body: JSON.stringify({ chatId: chat.id, message: draft }),
+        body: JSON.stringify({ chatId: chat.id, message: text }),
       });
+      setDraft("");
       const sent: PostPublic = {
         id: `local-${Date.now()}`,
-        text: draft.trim(),
+        text,
         date: new Date().toISOString(),
         out: true,
       };
       setSession((currentSession) =>
         currentSession.key === chatKey
-          ? { ...currentSession, posts: [sent, ...currentSession.posts] }
+          ? { ...currentSession, posts: [sent, ...currentSession.posts], status: "ready" }
           : currentSession,
       );
-      setDraft("");
+      const current = ++requestId.current;
+      const data = await api<{ posts: PostPublic[] }>(
+        `/api/accounts/${encodeURIComponent(accountId)}/messages?chatId=${encodeURIComponent(chat.id)}`,
+      ).catch(() => null);
+      if (data && current === requestId.current) {
+        const posts = data.posts.some((post) => post.out && post.text === text)
+          ? data.posts
+          : [sent, ...data.posts];
+        setSession((currentSession) =>
+          currentSession.key === chatKey
+            ? { ...currentSession, posts, status: "ready", error: null }
+            : currentSession,
+        );
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "没有发出去");
     } finally {
@@ -979,14 +1037,28 @@ function Thread({ accountId, chat }: { accountId: string | null; chat: ChatPubli
   }
 
   return (
-    <aside className="flex max-h-[52dvh] min-h-0 flex-col border-t border-border bg-card lg:max-h-none lg:border-t-0">
-      <div className="border-b border-border px-4 py-3 lg:px-5">
-        <p className="truncate text-base font-medium">{chat ? chat.title : "会话"}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {chat
-            ? `${kindLabel[chat.kind]}${chat.username ? ` · @${chat.username}` : ""}${chat.canPost ? "" : ` · ${chat.reason ?? "不能发送"}`}`
-            : "从左边点开一个已经有的会话。"}
-        </p>
+    <aside className={`${chat ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-1 flex-col bg-background`}>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-3 lg:px-5">
+        <Button variant="outline" size="sm" className="lg:hidden" onClick={onBack}>
+          返回
+        </Button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-medium">{chat ? chat.title : "会话"}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {chat
+              ? `${kindLabel[chat.kind]}${chat.username ? ` · @${chat.username}` : ""}${chat.canPost ? "" : ` · ${chat.reason ?? "不能发送"}`}`
+              : "从左边点开一个会话，这里会留下群里的消息。"}
+          </p>
+        </div>
+        {chat?.kind === "channel" ? (
+          <Button variant="outline" size="sm" onClick={() => setAuto(!auto)}>
+            {auto ? <Square /> : <ChevronsUpDown />}
+            {auto ? "停止滑动" : "自动滑动"}
+          </Button>
+        ) : null}
+        <Button variant="outline" size="sm" onClick={onBatch}>
+          群发
+        </Button>
       </div>
       <div ref={scroller} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3 lg:px-5">
         {!chat ? (
@@ -1208,6 +1280,7 @@ function Reader({ accountId, chat }: { accountId: string | null; chat: ChatPubli
 }
 
 function Composer({
+  compact = false,
   message,
   intervalSec,
   minInterval,
@@ -1249,18 +1322,21 @@ function Composer({
   onStop: () => void;
   onClearJob: () => void;
   onOpenJob: (job: Job) => void;
+  compact?: boolean;
 }) {
   const summary = job ? jobSummary(job) : null;
   const progress = summary && summary.total ? Math.round((summary.done / summary.total) * 100) : 0;
   return (
-    <aside className="flex max-h-[52dvh] min-h-0 flex-col border-t border-border bg-card lg:max-h-none lg:border-t-0">
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 lg:px-5">
+    <aside className="flex min-h-0 flex-col">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+        {compact ? null : (
         <div>
           <p className="font-heading text-2xl leading-none">发出去</p>
           <p className="mt-2 text-sm text-muted-foreground">
             每个账号先发一条，再换下一个。全部轮过一遍，才发各自的下一条。每条之间都等这个间隔。
           </p>
         </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="message">消息</Label>
           <Textarea
@@ -1435,13 +1511,11 @@ function Onboarding({
   onOpenNav,
   onAdd,
   onDemo,
-  onVault,
 }: {
   demoBusy: boolean;
   onOpenNav: () => void;
   onAdd: () => void;
   onDemo: () => void;
-  onVault: () => void;
 }) {
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
@@ -1467,9 +1541,6 @@ function Onboarding({
           <Button variant="outline" className="mt-2 h-10 w-full" disabled={demoBusy} onClick={onDemo}>
             {demoBusy ? <Loader2 className="animate-spin" /> : null}
             先用演示数据走一遍
-          </Button>
-          <Button variant="ghost" className="mt-2 h-10 w-full" onClick={onVault}>
-            接上存储机器人
           </Button>
         </div>
       </div>
@@ -1627,12 +1698,18 @@ function LoginDialog({
   open,
   onOpenChange,
   onReady,
+  embedded = false,
+  demoBusy = false,
+  onDemo,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onReady: (account: AccountPublic) => void;
+  embedded?: boolean;
+  demoBusy?: boolean;
+  onDemo?: () => void;
 }) {
-  const [step, setStep] = useState<LoginStep>("phone");
+  const [step, setStep] = useState<LoginStep>(embedded ? "qr" : "qr");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -1651,7 +1728,7 @@ function LoginDialog({
   const skipCancel = useRef(false);
 
   const reset = useCallback(() => {
-    setStep("phone");
+    setStep("qr");
     setCode("");
     setPassword("");
     setBotToken("");
@@ -1749,6 +1826,17 @@ function LoginDialog({
       if (seq === loginSeq.current) setBusy(false);
     }
   }
+
+  const qrBoot = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      qrBoot.current = false;
+      return;
+    }
+    if (qrBoot.current) return;
+    qrBoot.current = true;
+    void showQr();
+  }, [open]);
 
   useEffect(() => {
     if (!open || step !== "qr" || !loginId || qrBroken) return;
@@ -1870,11 +1958,10 @@ function LoginDialog({
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
+  const body = (
+    <>
+        <div>
+          <h2 className="text-base font-medium">
             {step === "code"
               ? "填写验证码"
               : step === "password"
@@ -1884,8 +1971,8 @@ function LoginDialog({
                   : step === "bot"
                     ? "机器人登录"
                     : "添加账号"}
-          </DialogTitle>
-          <DialogDescription>
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             {step === "phone"
               ? "使用带国家码的手机号。验证码会发到已登录的 Telegram，或通过短信。"
               : step === "qr"
@@ -1897,8 +1984,8 @@ function LoginDialog({
                     : hint
                       ? `密码提示：${hint}`
                       : "这个账号开了两步验证。"}
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
         {step === "phone" || step === "qr" || step === "bot" ? (
           <div className="grid grid-cols-3 gap-2">
             <Button
@@ -1949,12 +2036,12 @@ function LoginDialog({
                 className="h-10"
               />
             </div>
-            <DialogFooter>
+            <div className="flex justify-end gap-2">
               <Button type="submit" className="h-10" disabled={busy || !phone.trim()}>
                 {busy ? <Loader2 className="animate-spin" /> : null}
                 获取验证码
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         ) : null}
         {step === "code" ? (
@@ -1976,7 +2063,7 @@ function LoginDialog({
                 className="h-10"
               />
             </div>
-            <DialogFooter>
+            <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" disabled={busy} onClick={() => void resend()}>
                 重发
               </Button>
@@ -1984,7 +2071,7 @@ function LoginDialog({
                 {busy ? <Loader2 className="animate-spin" /> : null}
                 登录
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         ) : null}
         {step === "password" ? (
@@ -2006,12 +2093,12 @@ function LoginDialog({
                 className="h-10"
               />
             </div>
-            <DialogFooter>
+            <div className="flex justify-end gap-2">
               <Button type="submit" className="h-10" disabled={busy || !password.trim()}>
                 {busy ? <Loader2 className="animate-spin" /> : null}
                 完成登录
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         ) : null}
         {step === "qr" ? (
@@ -2024,12 +2111,12 @@ function LoginDialog({
               </div>
             ) : null}
             <p className="text-center text-xs text-muted-foreground">二维码大约每 30 秒更新一次。</p>
-            <DialogFooter>
+            <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" disabled={busy} onClick={() => void showQr()}>
                 {busy ? <Loader2 className="animate-spin" /> : null}
                 重新生成
               </Button>
-            </DialogFooter>
+            </div>
           </div>
         ) : null}
         {step === "bot" ? (
@@ -2052,15 +2139,42 @@ function LoginDialog({
                 className="h-10 font-mono text-sm"
               />
             </div>
-            <DialogFooter>
+            <div className="flex justify-end gap-2">
               <Button type="submit" className="h-10" disabled={busy || !botToken.trim()}>
                 {busy ? <Loader2 className="animate-spin" /> : null}
                 登录
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         ) : null}
-      </DialogContent>
+        {embedded && onDemo ? (
+          <Button variant="outline" className="h-10 w-full" disabled={demoBusy} onClick={onDemo}>
+            {demoBusy ? <Loader2 className="animate-spin" /> : null}
+            先用演示数据走一遍
+          </Button>
+        ) : null}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <main className="grid min-h-0 flex-1 place-items-center overflow-y-auto px-4 py-8">
+        <div className="w-full max-w-md space-y-4">
+          <div>
+            <h1 className="text-2xl font-medium">讯栈</h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              和官方客户端一样，用手机上的 Telegram 扫码登录。不用填写 API。
+            </p>
+          </div>
+          <div className="space-y-4 rounded-lg border border-border bg-card p-5">{body}</div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">{body}</DialogContent>
     </Dialog>
   );
 }

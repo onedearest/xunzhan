@@ -3,7 +3,7 @@ import { Raw } from "teleproto/events";
 import { LogLevel } from "teleproto/extensions/Logger";
 import { StringSession } from "teleproto/sessions";
 import { parseBotToken } from "./bot-token";
-import { demoChats, demoFails, demoPosts, isDemoAccount } from "./demo-data";
+import { demoChats, demoFails, demoPosts, isDemoAccount, rememberDemoPost } from "./demo-data";
 import { explain } from "./errors";
 import { resolveCredentials } from "./credentials";
 import { telegramLoginUrl } from "./login-link";
@@ -702,6 +702,7 @@ export async function sendTo(accountId: string, chatId: string, message: string)
     if (!demoChats(accountId).some((chat) => chat.id === chatId)) {
       throw new Error("找不到这个群，请刷新列表");
     }
+    rememberDemoPost(accountId, chatId, message);
     return;
   }
   const client = await connectAccount(accountId);
