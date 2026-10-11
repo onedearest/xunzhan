@@ -29,10 +29,21 @@ export function isVaultCode(value: string) {
 
 export function codesInText(text: string) {
   const found: string[] = [];
-  for (const token of text.match(/[A-Za-z0-9]{8}/g) ?? []) {
-    const code = token.toLowerCase();
-    if (!isVaultCode(code) || found.includes(code)) continue;
-    found.push(code);
+  const normalized = text
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[\uFF01-\uFF5E]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .toLowerCase();
+  for (const run of normalized.match(/[a-z0-9]+/g) ?? []) {
+    const windows = run.length === VAULT_LIMITS.codeLength ? [run] : [];
+    if (run.length > VAULT_LIMITS.codeLength && run.length <= 24) {
+      for (let index = 0; index + VAULT_LIMITS.codeLength <= run.length; index += 1) {
+        windows.push(run.slice(index, index + VAULT_LIMITS.codeLength));
+      }
+    }
+    for (const code of windows) {
+      if (!isVaultCode(code) || found.includes(code)) continue;
+      found.push(code);
+    }
   }
   return found;
 }
@@ -252,7 +263,7 @@ export function searchAskText() {
   return "把关键词发过来。我在已经打包的文件夹里按名称找。";
 }
 
-export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean }) {
+export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean; readsAllGroupMessages?: boolean }) {
   const lines = [
     "用底部的四个按钮就行。",
     "",
@@ -274,6 +285,9 @@ export function welcomeText(options: { username?: string; shareLinks: boolean; c
   }
   if (!options.channelBound) {
     lines.push("", "文件留在 Telegram 上。网页里如果绑定了私密频道，会再复制一份进去。");
+  }
+  if (options.readsAllGroupMessages === false) {
+    lines.push("", "群里直接发口令如果没有回复，请把机器人设为管理员。也可以在 @BotFather 发送 /setprivacy，选 Disable，然后把机器人移出群再拉进来。");
   }
   return lines.join("\n");
 }

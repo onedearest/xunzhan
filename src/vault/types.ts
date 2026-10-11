@@ -36,6 +36,7 @@ export type TgUser = {
   first_name?: string;
   last_name?: string;
   username?: string;
+  can_read_all_group_messages?: boolean;
 };
 
 export type TgChat = {
@@ -100,6 +101,7 @@ export type TgCallback = {
 export type TgChatMemberUpdate = {
   chat: TgChat;
   from?: TgUser;
+  old_chat_member?: { status?: string };
   new_chat_member?: { status?: string };
 };
 
@@ -168,6 +170,7 @@ export type VaultData = {
   botId?: string;
   botName?: string;
   botUsername?: string;
+  readsAllGroupMessages?: boolean;
   channelId?: string;
   channelTitle?: string;
   shareLinks: boolean;

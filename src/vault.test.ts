@@ -6,6 +6,7 @@ import test from "node:test";
 import { applyVaultUpdate, deliverItem, deliverPack, type VaultIO } from "./vault/apply";
 import { BotApiError, BotClient, botCommands, canPostInChannel, explainBot } from "./vault/bot-client";
 import {
+  codesInText,
   commandOf,
   deliveryBatches,
   draftFromMessage,
@@ -86,6 +87,13 @@ function finishPack(data: VaultData, name: string, now: string, nextCode: () => 
   const asked = step(data, press(updateId, "e"), now, nextCode);
   return step(asked.data, textMessage(updateId + 1, updateId + 1, name), now, nextCode);
 }
+
+test("finds a passcode inside punctuation and fullwidth letters", () => {
+  assert.deepEqual(codesInText("口令：abcdefgj。"), ["abcdefgj"]);
+  assert.deepEqual(codesInText("口令：ａｂｃｄｅｆｇｊ"), ["abcdefgj"]);
+  assert.deepEqual(codesInText("0abcdefgj"), ["abcdefgj"]);
+  assert.equal(codesInText("https://t.me/JJJG688Bot?start=3jbeu6fr").includes("3jbeu6fr"), true);
+});
 
 test("hides the middle of a BotFather token", () => {
   assert.equal(maskToken(TOKEN), "123456789:••••Dsaw");
@@ -310,7 +318,7 @@ test("replies to a code in a group with a button and marks it for deletion", () 
   assert.equal(reply?.deleteAfterMs, 60_000);
   assert.match(reply?.text ?? "", /周报/);
   assert.equal(reply?.keyboard?.[0]?.[0]?.url, "https://t.me/storebot?start=abcdefgj");
-  assert.deepEqual(reply?.keyboard?.[1]?.[0]?.copy_text, { text: "abcdefgj" });
+  assert.equal(reply?.keyboard?.[0]?.[0]?.text, "打开「周报素材包」");
   const comment = step(
     saved.data,
     update({
@@ -375,7 +383,7 @@ test("replies to a code in a group with a button and marks it for deletion", () 
     now,
     nextCode,
   );
-  assert.equal(missing.decision.replies.length, 0);
+  assert.match(missing.decision.replies[0]?.text ?? "", /没有这个口令/);
 });
 
 test("does not store the same message twice", () => {

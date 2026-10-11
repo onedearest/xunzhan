@@ -174,6 +174,33 @@ function sendReply(io: VaultIO, reply: Reply) {
   });
 }
 
+async function sendReplyTrying(io: VaultIO, reply: Reply) {
+  const variants = [reply];
+  const withoutCopy = stripCopyButtons(reply);
+  if (withoutCopy) variants.push(withoutCopy);
+  if (reply.messageThreadId) variants.push({ ...(withoutCopy ?? reply), messageThreadId: undefined });
+  let last: unknown;
+  for (const [index, variant] of variants.entries()) {
+    try {
+      return await sendReply(io, variant);
+    } catch (error) {
+      last = error;
+      const detail = `${error instanceof Error ? error.message : ""} ${explainBot(error)}`.toLowerCase();
+      const retry = /button|keyboard|copy|thread|topic|parse/.test(detail);
+      if (!retry || index === variants.length - 1) throw error;
+    }
+  }
+  throw last;
+}
+
+function stripCopyButtons(reply: Reply): Reply | undefined {
+  if (!reply.keyboard?.some((row) => row.some((button) => button.copy_text))) return undefined;
+  const keyboard = reply.keyboard
+    .map((row) => row.filter((button) => !button.copy_text))
+    .filter((row) => row.length > 0);
+  return { ...reply, keyboard };
+}
+
 async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
   if (decision.copy) {
     try {
@@ -223,7 +250,7 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
         sent = await sendReply(io, reply);
       }
     } else {
-      sent = await sendReply(io, reply);
+      sent = await sendReplyTrying(io, reply);
     }
     if (reply.deleteAfterMs && typeof sent === "number") {
       const chatId = reply.chatId;

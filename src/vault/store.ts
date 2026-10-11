@@ -28,6 +28,7 @@ export function createVaultRepository(dir: string): VaultRepository {
         botId: parsed.botId,
         botName: parsed.botName,
         botUsername: parsed.botUsername,
+        readsAllGroupMessages: typeof parsed.readsAllGroupMessages === "boolean" ? parsed.readsAllGroupMessages : undefined,
         channelId: parsed.channelId,
         channelTitle: parsed.channelTitle,
         shareLinks: parsed.shareLinks !== false,

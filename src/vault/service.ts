@@ -172,6 +172,8 @@ export async function connectVault(
     botId: String(me.id),
     botName: me.first_name || me.username || "存储机器人",
     botUsername: me.username,
+    readsAllGroupMessages:
+      typeof me.can_read_all_group_messages === "boolean" ? me.can_read_all_group_messages : data.readsAllGroupMessages,
     channelId,
     channelTitle,
     shareLinks: typeof input.shareLinks === "boolean" ? input.shareLinks : data.shareLinks,

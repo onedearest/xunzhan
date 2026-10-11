@@ -68,8 +68,20 @@ type Options = {
 
 export function reduceVault(data: VaultData, update: TgUpdate, options: Options): { data: VaultData; decision: Decision } {
   const decision: Decision = { replies: [] };
-  if (update.my_chat_member?.chat?.type === "channel") {
-    return { data: remember(data, update.my_chat_member.chat, options.now), decision };
+  if (update.my_chat_member?.chat) {
+    const member = update.my_chat_member;
+    if (member.chat.type === "channel") return { data: remember(data, member.chat, options.now), decision };
+    const status = member.new_chat_member?.status;
+    const oldStatus = member.old_chat_member?.status;
+    const joined = (!oldStatus || oldStatus === "left" || oldStatus === "kicked") && (status === "member" || status === "administrator");
+    if (joined && (member.chat.type === "group" || member.chat.type === "supergroup") && status === "member" && data.readsAllGroupMessages !== true) {
+      decision.replies.push({
+        kind: "send",
+        chatId: String(member.chat.id),
+        text: "我还看不见群里的普通消息，所以直接发口令不会有回复。请把我设为管理员，或在 @BotFather 里对这个机器人发送 /setprivacy，选 Disable，然后把我移出群再拉进来。",
+      });
+    }
+    return { data, decision };
   }
   if (update.channel_post?.chat?.type === "channel") {
     return { data: remember(data, update.channel_post.chat, options.now), decision };
@@ -114,7 +126,20 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
       const pack = readyPacks(data).find((entry) => entry.code === code);
       return pack?.code ? [pack] : [];
     });
-  if (!packs.length) return { data, decision };
+  if (!packs.length) {
+    const looked = codesInText([message.text, message.caption].filter(Boolean).join("\n"));
+    if (looked.length) {
+      decision.replies.push({
+        kind: "send",
+        chatId: String(message.chat.id),
+        replyToMessageId: message.message_id,
+        messageThreadId: threadId,
+        deleteAfterMs: 60_000,
+        text: "没有这个口令。",
+      });
+    }
+    return { data, decision };
+  }
   decision.replies.push({
     kind: "send",
     chatId: String(message.chat.id),
@@ -122,14 +147,11 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
     messageThreadId: threadId,
     deleteAfterMs: 60_000,
     text: packs.map((pack) => `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件。点按钮打开文件夹。`).join("\n"),
-    keyboard: packs.flatMap((pack) => [
-      [
-        {
-          text: `打开「${clipName(pack.name)}」`,
-          url: `https://t.me/${data.botUsername}?start=${pack.code}`,
-        },
-      ],
-      [copyCodeButton(pack.code || "")],
+    keyboard: packs.map((pack) => [
+      {
+        text: `打开「${clipName(pack.name)}」`,
+        url: `https://t.me/${data.botUsername}?start=${pack.code}`,
+      },
     ]),
   });
   return { data, decision };
@@ -398,6 +420,7 @@ function reduceCommand(
           username: data.botUsername,
           shareLinks: data.shareLinks,
           channelBound: Boolean(data.channelId),
+          readsAllGroupMessages: data.readsAllGroupMessages,
         }),
         decision,
       ),
