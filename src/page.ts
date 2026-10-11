@@ -23,7 +23,7 @@ export function homePage() {
 <body>
 <main>
   <h1>Storage bot</h1>
-  <p>贴上 @BotFather 的令牌。在 Telegram 里点存储，先建文件夹，确认后发一个至少 5 个字符的名称，名称发出去就生成口令和链接。</p>
+  <p>这台电脑最多接入 10000 个机器人。每个令牌分开收消息，文件夹也分开保存。贴上 @BotFather 的令牌即可，已经在收的机器人不会被换掉。</p>
   <ol>
     <li>在 @BotFather 发送 /newbot，复制整段令牌。</li>
     <li>贴到下面，点开始接收。这台机器要一直开着。</li>
@@ -38,11 +38,13 @@ export function homePage() {
     <label><input id="share" type="checkbox" checked /> 允许别人用链接取回</label>
     <p id="error" class="err"></p>
     <div class="row">
-      <button type="submit">开始接收</button>
-      <button class="ghost" id="pause" type="button">暂停</button>
-      <button class="ghost" id="forget" type="button">移除令牌</button>
+      <button type="submit">接入这个机器人</button>
     </div>
   </form>
+  <section>
+    <h2>机器人</h2>
+    <div id="bots"></div>
+  </section>
   <section>
     <h2>文件夹</h2>
     <div id="list"></div>
@@ -50,18 +52,69 @@ export function homePage() {
 </main>
 <script>
 const statusEl = document.querySelector("#status");
+const botsEl = document.querySelector("#bots");
 const listEl = document.querySelector("#list");
 const errorEl = document.querySelector("#error");
+let botPage = 1;
 async function api(path, options) {
   const response = await fetch(path, { headers: { "content-type": "application/json" }, ...options });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "没有完成");
   return data;
 }
+function button(label, className, onClick) {
+  const node = document.createElement("button");
+  node.type = "button";
+  if (className) node.className = className;
+  node.textContent = label;
+  node.addEventListener("click", onClick);
+  return node;
+}
 function draw(data) {
   const status = data.status || {};
-  const running = status.running ? "正在接收" : status.connected ? "已暂停" : "未接入";
-  statusEl.textContent = running + " · 文件夹 " + (status.packCount ?? 0) + " 个" + (status.botUsername ? " · @" + status.botUsername : "") + (status.lastError ? " · " + status.lastError : "");
+  const count = status.botCount ?? 0;
+  const max = status.maxBots ?? 10000;
+  const running = status.runningCount ?? (status.running ? 1 : 0);
+  statusEl.textContent = "已接入 " + count + " / " + max + " 个机器人 · 正在接收 " + running + " 个 · 文件夹 " + (status.packCount ?? 0) + " 个" + (status.lastError ? " · " + status.lastError : "");
+  botsEl.replaceChildren();
+  const bots = data.bots || [];
+  if (!bots.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "还没有接入机器人。";
+    botsEl.append(empty);
+  }
+  for (const bot of bots) {
+    const line = document.createElement("p");
+    const who = bot.botUsername ? "@" + bot.botUsername : bot.botId;
+    line.textContent = who + " · 文件夹 " + bot.packCount + (bot.running ? " · 正在接收" : " · 已暂停") + (bot.lastError ? " · " + bot.lastError : "");
+    const row = document.createElement("div");
+    row.className = "row";
+    row.append(button(bot.running ? "暂停" : "继续", "ghost", async () => {
+      errorEl.textContent = "";
+      try {
+        if (bot.running) draw(await api("/api/vault/pause", { method: "POST", body: JSON.stringify({ botId: bot.botId }) }));
+        else draw(await api("/api/vault", { method: "PUT", body: JSON.stringify({ botId: bot.botId }) }));
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    }));
+    row.append(button("移除令牌", "ghost", async () => {
+      errorEl.textContent = "";
+      try {
+        draw(await api("/api/vault/forget", { method: "POST", body: JSON.stringify({ botId: bot.botId }) }));
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    }));
+    botsEl.append(line, row);
+  }
+  if ((data.pages || 1) > 1) {
+    const nav = document.createElement("div");
+    nav.className = "row";
+    if (data.page > 1) nav.append(button("上一页", "ghost", () => { botPage = data.page - 1; load().catch((error) => { errorEl.textContent = error.message; }); }));
+    if (data.page < data.pages) nav.append(button("下一页", "ghost", () => { botPage = data.page + 1; load().catch((error) => { errorEl.textContent = error.message; }); }));
+    botsEl.append(nav);
+  }
   listEl.replaceChildren();
   const items = data.items || [];
   if (!items.length) {
@@ -71,13 +124,15 @@ function draw(data) {
   } else {
     for (const item of items) {
       const line = document.createElement("p");
-      line.textContent = item.name + " · " + item.fileCount + " 个 · " + item.code;
+      const owner = bots.find((bot) => bot.botId === item.botId);
+      const who = owner && owner.botUsername ? "@" + owner.botUsername + " · " : "";
+      line.textContent = who + item.name + " · " + item.fileCount + " 个 · " + item.code;
       listEl.append(line);
     }
   }
 }
 async function load() {
-  draw(await api("/api/vault"));
+  draw(await api("/api/vault?page=" + botPage));
 }
 document.querySelector("#form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -90,13 +145,12 @@ document.querySelector("#form").addEventListener("submit", async (event) => {
       shareLinks: document.querySelector("#share").checked
     }) });
     document.querySelector("#token").value = "";
+    botPage = 1;
     draw(data);
   } catch (error) {
     errorEl.textContent = error.message;
   }
 });
-document.querySelector("#pause").onclick = async () => { errorEl.textContent = ""; draw(await api("/api/vault/pause", { method: "POST" })); };
-document.querySelector("#forget").onclick = async () => { errorEl.textContent = ""; draw(await api("/api/vault/forget", { method: "POST" })); };
 load().catch((error) => { statusEl.textContent = error.message; });
 </script>
 </body>

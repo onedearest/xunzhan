@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -16,8 +16,9 @@ import {
   retrievalPlan,
 } from "./vault/format";
 import { reduceVault } from "./vault/reduce";
+import { createFleet } from "./vault/fleet";
 import { createVaultRepository } from "./vault/store";
-import { toStatus } from "./vault/service";
+import { connectVault, pauseVault, toStatus, vaultView } from "./vault/service";
 import { emptyVault, VAULT_LIMITS, type TgUpdate, type VaultData, type VaultFile, type VaultPack } from "./vault/types";
 
 const TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw";
@@ -809,3 +810,135 @@ function fakeIo(sent: string[], copy: () => Promise<number>): VaultIO {
     },
   };
 }
+
+const SECOND = "987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw";
+
+function hangingClients() {
+  return (token: string) => {
+    const id = Number(token.split(":")[0]);
+    return {
+      async getMe() {
+        return { id, is_bot: true, first_name: "存", username: `b${id}` };
+      },
+      async deleteWebhook() {
+        return true;
+      },
+      async setCommands() {
+        return true;
+      },
+      async getUpdates(_offset: number, signal: AbortSignal) {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return [];
+      },
+      async deleteMessage() {
+        return true;
+      },
+    } as unknown as BotClient;
+  };
+}
+
+test("keeps a second bot token beside the first", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "vault-fleet-"));
+  const fleet = createFleet(dir);
+  const clientFor = hangingClients();
+  try {
+    const first = await connectVault({ token: TOKEN }, fleet, clientFor);
+    assert.equal(first.status.botCount, 1);
+    assert.equal(first.status.maxBots, 10000);
+    const second = await connectVault({ token: SECOND }, fleet, clientFor);
+    assert.equal(second.status.botCount, 2);
+    assert.equal(second.status.runningCount, 2);
+    assert.equal(second.bots.map((bot) => bot.botId).sort().join(","), "123456789,987654321");
+    const body = JSON.stringify(second);
+    assert.equal(body.includes("AAHdqTcvCH1vGWJxfSeofSAs0K5PALD"), false);
+    assert.equal(body.includes("BBHdqTcvCH1vGWJxfSeofSAs0K5PALD"), false);
+    const index = await readFile(path.join(dir, "fleet.json"), "utf8");
+    assert.equal(index.includes("AAHdqTcvCH1vGWJxfSeofSAs0K5PALD"), false);
+    assert.equal(index.includes("BBHdqTcvCH1vGWJxfSeofSAs0K5PALD"), false);
+
+    await fleet.repo("123456789").update((data) => ({
+      ...data,
+      packs: [
+        ...data.packs,
+        {
+          id: "p",
+          status: "ready",
+          code: "abcdefgj",
+          ownerId: "1",
+          ownerName: "甲",
+          files: [],
+          createdAt: "2026-10-11T00:00:00.000Z",
+        },
+      ],
+    }));
+    const viewed = await vaultView("", 1, fleet);
+    assert.equal(viewed.items.filter((item) => item.botId === "123456789").length, 1);
+    assert.equal(viewed.items.filter((item) => item.botId === "987654321").length, 0);
+    assert.equal((await fleet.repo("987654321").load()).packs.length, 0);
+
+    const paused = await pauseVault({ botId: "123456789" }, fleet);
+    assert.equal(paused.bots.find((bot) => bot.botId === "123456789")?.running, false);
+    assert.equal(paused.bots.find((bot) => bot.botId === "987654321")?.running, true);
+    assert.equal(paused.status.botCount, 2);
+  } finally {
+    await pauseVault({ botId: "123456789" }, fleet).catch(() => undefined);
+    await pauseVault({ botId: "987654321" }, fleet).catch(() => undefined);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("adopts an existing vault without putting the token in the index", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "vault-legacy-"));
+  try {
+    await writeFile(
+      path.join(dir, "vault.json"),
+      JSON.stringify({ ...emptyVault(), token: TOKEN, enabled: false, botUsername: "storebot" }),
+    );
+    const fleet = createFleet(dir);
+    await fleet.prepare();
+    const saved = await fleet.repo("123456789").load();
+    assert.equal(saved.token, TOKEN);
+    assert.equal(saved.botUsername, "storebot");
+    const index = await readFile(path.join(dir, "fleet.json"), "utf8");
+    assert.equal(index.includes("AAHdqTcvCH1vGWJxfSeofSAs0K5PALD"), false);
+    assert.equal(index.includes("123456789"), true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("refuses the 10001st bot", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "vault-cap-"));
+  try {
+    const bots = Array.from({ length: VAULT_LIMITS.maxBots }, (_, index) => ({
+      id: String(300000 + index),
+      active: true,
+      packCount: 0,
+      enabled: false,
+      shareLinks: true,
+    }));
+    await writeFile(path.join(dir, "fleet.json"), JSON.stringify({ bots }));
+    const fleet = createFleet(dir);
+    let called = false;
+    await assert.rejects(
+      () =>
+        connectVault({ token: TOKEN }, fleet, () => {
+          called = true;
+          throw new Error("不应去连 Telegram");
+        }),
+      (error: unknown) => {
+        assert.match(error instanceof Error ? error.message : "", /最多接入 10000/);
+        return true;
+      },
+    );
+    assert.equal(called, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

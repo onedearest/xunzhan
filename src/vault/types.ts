@@ -7,6 +7,7 @@ export const VAULT_LIMITS = {
   adminPageSize: 20,
   seenChannels: 8,
   codeLength: 8,
+  maxBots: 10000,
 } as const;
 
 export const CODE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -184,6 +185,9 @@ export type VaultStatus = {
   lastError?: string;
   seenChannels: SeenChannel[];
   connectedAt?: string;
+  botCount?: number;
+  runningCount?: number;
+  maxBots?: number;
 };
 
 export type VaultPackPublic = {
@@ -196,6 +200,20 @@ export type VaultPackPublic = {
   files: { name: string; kind: VaultKind; size?: number }[];
   createdAt: string;
   link?: string;
+  botId?: string;
+};
+
+export type BotPublic = {
+  botId: string;
+  botName?: string;
+  botUsername?: string;
+  tokenHint?: string;
+  running: boolean;
+  enabled: boolean;
+  packCount: number;
+  shareLinks: boolean;
+  lastError?: string;
+  channelTitle?: string;
 };
 
 export type Draft = {

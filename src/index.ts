@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { HttpError } from "./http";
-import { connectVault, deleteVaultItem, forgetVault, pauseVault, resumeVault, vaultView } from "./vault/service";
 import { homePage } from "./page";
+import { openFileLimit } from "./vault/fleet";
+import { connectVault, deleteVaultItem, forgetVault, pauseVault, resumeVault, vaultView } from "./vault/service";
+import { VAULT_LIMITS } from "./vault/types";
 
 const port = Number(process.env.PORT || 43128);
 const host = process.env.HOST || "127.0.0.1";
@@ -36,10 +38,18 @@ async function dispatch(request: Request): Promise<Response> {
       const body = (await request.json()) as { token?: unknown; channelId?: unknown; shareLinks?: unknown };
       return json(await connectVault(body));
     }
-    if (pathname === "/api/vault/pause" && method === "POST") return json(await pauseVault());
-    if (pathname === "/api/vault/forget" && method === "POST") return json(await forgetVault());
+    if (pathname === "/api/vault/pause" && method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { botId?: unknown };
+      return json(await pauseVault(body));
+    }
+    if (pathname === "/api/vault/forget" && method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { botId?: unknown };
+      return json(await forgetVault(body));
+    }
     const item = pathname.match(/^\/api\/vault\/items\/([^/]+)$/);
-    if (item && method === "DELETE") return json(await deleteVaultItem(decodeURIComponent(item[1])));
+    if (item && method === "DELETE") {
+      return json(await deleteVaultItem(decodeURIComponent(item[1]), url.searchParams.get("bot") || undefined));
+    }
     return new Response("没有这个页面", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
   } catch (error) {
     return fail(error);
@@ -90,5 +100,9 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, host, () => {
   console.log(`storage-bot http://${host}:${port}`);
+  const limit = openFileLimit();
+  if (limit !== null && limit < VAULT_LIMITS.maxBots + 2000) {
+    console.log(`同时打开的文件数是 ${limit}。要接 ${VAULT_LIMITS.maxBots} 个机器人，请把它调到 20000 以上。`);
+  }
   void resumeVault();
 });

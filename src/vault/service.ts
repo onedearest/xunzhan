@@ -2,10 +2,11 @@ import { parseBotToken } from "../bot-token";
 import { HttpError } from "../http";
 import { applyVaultUpdate, ioFromClient } from "./apply";
 import { BotApiError, BotClient, canPostInChannel, explainBot } from "./bot-client";
+import { botIdFromToken, fleetStore, isBotId, type Fleet } from "./fleet";
 import { maskToken, normalizeChannel, queryItems } from "./format";
-import { vaultRepository, type VaultRepository } from "./store";
 import {
   VAULT_LIMITS,
+  type BotPublic,
   type VaultData,
   type VaultPack,
   type VaultPackPublic,
@@ -14,29 +15,43 @@ import {
 
 export type VaultView = {
   status: VaultStatus;
+  bots: BotPublic[];
   items: VaultPackPublic[];
   page: number;
   pages: number;
   total: number;
 };
 
-type Runtime = {
+type BotLoop = {
   generation: number;
-  looping: boolean;
   running: boolean;
-  lastError?: string;
   controller?: AbortController;
+};
+
+type Runtime = {
+  bots: Map<string, BotLoop>;
 };
 
 function runtime(): Runtime {
   const root = globalThis as { __storageBot?: Runtime };
-  if (!root.__storageBot) {
-    root.__storageBot = { generation: 0, looping: false, running: false };
-  }
+  if (!root.__storageBot?.bots) root.__storageBot = { bots: new Map() };
   return root.__storageBot;
 }
 
-export function toPublic(pack: VaultPack, username?: string): VaultPackPublic {
+function loopOf(botId: string) {
+  const bots = runtime().bots;
+  const found = bots.get(botId);
+  if (found) return found;
+  const created: BotLoop = { generation: 0, running: false };
+  bots.set(botId, created);
+  return created;
+}
+
+export function botRunning(botId: string) {
+  return Boolean(runtime().bots.get(botId)?.running);
+}
+
+export function toPublic(pack: VaultPack, username?: string, botId?: string): VaultPackPublic {
   return {
     code: pack.code || "",
     name: pack.name || "未命名",
@@ -47,6 +62,7 @@ export function toPublic(pack: VaultPack, username?: string): VaultPackPublic {
     files: pack.files.map((file) => ({ name: file.name, kind: file.kind, size: file.size })),
     createdAt: pack.readyAt || pack.createdAt,
     link: username && pack.code ? `https://t.me/${username}?start=${pack.code}` : undefined,
+    botId,
   };
 }
 
@@ -62,52 +78,44 @@ export function toStatus(data: VaultData, running: boolean): VaultStatus {
     channelTitle: data.channelTitle,
     shareLinks: data.shareLinks,
     packCount: data.packs.filter((pack) => pack.status === "ready").length,
-    lastError: runtime().lastError || data.lastError,
+    lastError: data.lastError,
     seenChannels: data.seenChannels,
     connectedAt: data.connectedAt,
   };
 }
 
-function viewFrom(data: VaultData, query: string, page: number): VaultView {
-  const ready = data.packs.filter((pack) => pack.status === "ready" && pack.code);
-  const listed = queryItems(
-    ready.map((pack) => ({
-      ...pack,
-      name: pack.name || "",
-      code: pack.code || "",
-      text: pack.files.map((file) => file.name).join("\n"),
-      createdAt: pack.readyAt || pack.createdAt,
-    })),
-    query,
-    page,
-    VAULT_LIMITS.adminPageSize,
-  );
-  return {
-    status: toStatus(data, runtime().running),
-    items: listed.items.map((pack) => toPublic(pack, data.botUsername)),
-    page: listed.page,
-    pages: listed.pages,
-    total: listed.total,
-  };
-}
 
-export async function vaultView(query = "", page = 1, repo: VaultRepository = vaultRepository()) {
-  await resumeVault(repo);
-  return viewFrom(await repo.load(), query, page);
+export async function vaultView(query = "", page = 1, fleet: Fleet = fleetStore()) {
+  await resumeVault(fleet);
+  return fleetView(fleet, query, page);
 }
 
 export async function connectVault(
-  input: { token?: unknown; channelId?: unknown; shareLinks?: unknown },
-  repo: VaultRepository = vaultRepository(),
+  input: { token?: unknown; botId?: unknown; channelId?: unknown; shareLinks?: unknown },
+  fleet: Fleet = fleetStore(),
   clientFor: (token: string) => BotClient = (token) => new BotClient(token),
 ) {
-  const current = await repo.load();
+  await fleet.prepare();
   const pasted = typeof input.token === "string" ? input.token.trim() : "";
-  const token = pasted ? parseBotToken(pasted) : current.token;
-  if (pasted && !token) {
+  const parsed = pasted ? parseBotToken(pasted) : null;
+  if (pasted && !parsed) {
     throw new HttpError(400, "令牌格式不正确。请粘贴 @BotFather 发来的整段，类似 123456789:ABC…");
   }
+  const requested = typeof input.botId === "string" && isBotId(input.botId) ? input.botId : "";
+  const fromToken = parsed ? botIdFromToken(parsed) : null;
+  let botId = fromToken || requested;
+  if (!botId) botId = await onlyActive(fleet);
+  if (!botId) throw new HttpError(400, "请填写机器人令牌");
+  const repo = fleet.repo(botId);
+  const current = await repo.load();
+  const token = parsed || current.token;
   if (!token) throw new HttpError(400, "请填写机器人令牌");
+  if (botIdFromToken(token) !== botId) throw new HttpError(400, "令牌和机器人对不上");
+  const already = (await fleet.entries()).some((bot) => bot.id === botId && bot.active);
+  if (!already && (await fleet.activeCount()) >= VAULT_LIMITS.maxBots) {
+    throw new HttpError(400, `最多接入 ${VAULT_LIMITS.maxBots} 个机器人`);
+  }
+
   const client = clientFor(token);
   let me;
   try {
@@ -117,6 +125,7 @@ export async function connectVault(
     throw new HttpError(message.includes("令牌") ? 400 : 502, message);
   }
   if (!me.is_bot) throw new HttpError(400, "这不是一个机器人令牌");
+  if (String(me.id) !== botId) throw new HttpError(400, "令牌和机器人对不上");
 
   let channelId = current.channelId;
   let channelTitle = current.channelTitle;
@@ -170,34 +179,45 @@ export async function connectVault(
     lastError: undefined,
     connectedAt: new Date().toISOString(),
   }));
-  runtime().lastError = undefined;
-  startLoop(repo, clientFor);
-  return viewFrom(saved, "", 1);
+  await fleet.note(botId, saved);
+  startLoop(fleet, botId, clientFor);
+  return fleetView(fleet, "", 1);
 }
 
-export async function pauseVault(repo: VaultRepository = vaultRepository()) {
-  stopLoop();
-  const saved = await repo.update((data) => ({ ...data, enabled: false }));
-  return viewFrom(saved, "", 1);
+export async function pauseVault(input: { botId?: unknown } = {}, fleet: Fleet = fleetStore()) {
+  await fleet.prepare();
+  const botId = await chosenBot(input.botId, fleet);
+  stopLoop(botId);
+  const saved = await fleet.repo(botId).update((data) => ({ ...data, enabled: false }));
+  await fleet.note(botId, saved);
+  return fleetView(fleet, "", 1);
 }
 
-export async function forgetVault(repo: VaultRepository = vaultRepository()) {
-  stopLoop();
-  const saved = await repo.update((data) => ({
+export async function forgetVault(input: { botId?: unknown } = {}, fleet: Fleet = fleetStore()) {
+  await fleet.prepare();
+  const botId = await chosenBot(input.botId, fleet);
+  stopLoop(botId);
+  const saved = await fleet.repo(botId).update((data) => ({
     ...data,
     token: "",
     enabled: false,
     lastError: undefined,
   }));
-  runtime().lastError = undefined;
-  return viewFrom(saved, "", 1);
+  await fleet.note(botId, saved);
+  await fleet.markInactive(botId);
+  return fleetView(fleet, "", 1);
 }
 
-export async function deleteVaultItem(code: string, repo: VaultRepository = vaultRepository()) {
+export async function deleteVaultItem(code: string, botId?: string, fleet: Fleet = fleetStore()) {
+  await fleet.prepare();
+  const id = botId && isBotId(botId) ? botId : await onlyActive(fleet);
+  if (!id) throw new HttpError(400, "请选择机器人");
+  const repo = fleet.repo(id);
   const current = await repo.load();
   const pack = current.packs.find((entry) => entry.code === code);
   if (!pack) throw new HttpError(404, "没有这个口令");
-  await repo.update((data) => ({ ...data, packs: data.packs.filter((entry) => entry.code !== code) }));
+  const saved = await repo.update((data) => ({ ...data, packs: data.packs.filter((entry) => entry.code !== code) }));
+  await fleet.note(id, saved);
   if (current.token) {
     const client = new BotClient(current.token);
     for (const file of pack.files) {
@@ -206,66 +226,78 @@ export async function deleteVaultItem(code: string, repo: VaultRepository = vaul
       }
     }
   }
-  return viewFrom(await repo.load(), "", 1);
+  return fleetView(fleet, "", 1);
 }
 
 let booting: Promise<void> | null = null;
 
-export function resumeVault(repo: VaultRepository = vaultRepository()) {
-  if (runtime().looping) return Promise.resolve();
-  if (!booting) {
-    booting = repo
-      .load()
-      .then((data) => {
-        if (runtime().looping) return;
-        if (data.enabled && data.token) startLoop(repo);
-      })
-      .catch((error: unknown) => {
-        runtime().lastError = explainBot(error) || "存储机器人没有启动";
-      })
-      .finally(() => {
-        booting = null;
-      });
-  }
+export function resumeVault(fleet: Fleet = fleetStore()) {
+  if (booting) return booting;
+  booting = (async () => {
+    await fleet.prepare();
+    const entries = await fleet.entries();
+    let index = 0;
+    for (const entry of entries) {
+      if (!entry.active) continue;
+      const data = await fleet.repo(entry.id).load();
+      if (!data.enabled || !data.token) continue;
+      if (botRunning(entry.id)) continue;
+      const delay = index * 10;
+      index += 1;
+      setTimeout(() => {
+        if (!botRunning(entry.id)) startLoop(fleet, entry.id);
+      }, delay);
+    }
+  })()
+    .catch((error: unknown) => {
+      console.error(explainBot(error) || "存储机器人没有启动");
+    })
+    .finally(() => {
+      booting = null;
+    });
   return booting;
 }
 
-function startLoop(repo: VaultRepository, clientFor: (token: string) => BotClient = (token) => new BotClient(token)) {
-  const rt = runtime();
-  rt.generation += 1;
-  const generation = rt.generation;
-  rt.controller?.abort();
+function startLoop(
+  fleet: Fleet,
+  botId: string,
+  clientFor: (token: string) => BotClient = (token) => new BotClient(token),
+) {
+  const loop = loopOf(botId);
+  loop.generation += 1;
+  const generation = loop.generation;
+  loop.controller?.abort();
   const controller = new AbortController();
-  rt.controller = controller;
-  rt.looping = true;
-  rt.running = true;
-  void poll(repo, clientFor, generation, controller).finally(() => {
-    if (runtime().generation === generation) {
-      runtime().looping = false;
-      runtime().running = false;
-    }
+  loop.controller = controller;
+  loop.running = true;
+  const repo = fleet.repo(botId);
+  void poll(fleet, botId, repo, clientFor, generation, controller).finally(() => {
+    const current = runtime().bots.get(botId);
+    if (current?.generation === generation) current.running = false;
   });
 }
 
-function stopLoop() {
-  const rt = runtime();
-  rt.generation += 1;
-  rt.controller?.abort();
-  rt.looping = false;
-  rt.running = false;
+function stopLoop(botId: string) {
+  const loop = runtime().bots.get(botId);
+  if (!loop) return;
+  loop.generation += 1;
+  loop.controller?.abort();
+  loop.running = false;
 }
 
 async function poll(
-  repo: VaultRepository,
+  fleet: Fleet,
+  botId: string,
+  repo: ReturnType<Fleet["repo"]>,
   clientFor: (token: string) => BotClient,
   generation: number,
   controller: AbortController,
 ) {
   let failures = 0;
   let announced = false;
-  while (runtime().generation === generation) {
+  while (runtime().bots.get(botId)?.generation === generation) {
     const data = await repo.load();
-    if (!data.enabled || !data.token || runtime().generation !== generation) return;
+    if (!data.enabled || !data.token || runtime().bots.get(botId)?.generation !== generation) return;
     const client = clientFor(data.token);
     try {
       if (!announced) {
@@ -274,16 +306,16 @@ async function poll(
       }
       await sweepExpiring(repo, client);
       const updates = await client.getUpdates(data.offset, controller.signal);
-      if (runtime().generation !== generation) return;
+      if (runtime().bots.get(botId)?.generation !== generation) return;
       failures = 0;
-      runtime().lastError = undefined;
       if (data.lastError) await repo.update((current) => ({ ...current, lastError: undefined }));
       for (const update of updates) {
-        if (runtime().generation !== generation) return;
+        if (runtime().bots.get(botId)?.generation !== generation) return;
         await applyVaultUpdate(update, repo, ioFromClient(client));
       }
+      if (updates.length || data.lastError) await fleet.note(botId, await repo.load());
     } catch (error) {
-      if (controller.signal.aborted || runtime().generation !== generation) return;
+      if (controller.signal.aborted || runtime().bots.get(botId)?.generation !== generation) return;
       if (error instanceof BotApiError && error.code === 409 && failures < 3) {
         failures += 1;
         await sleep(1000, controller.signal);
@@ -291,15 +323,99 @@ async function poll(
       }
       const message = explainBot(error) || "收消息时断了";
       failures += 1;
-      runtime().lastError = message;
       const latest = await repo.load();
-      if (latest.lastError !== message) await repo.update((current) => ({ ...current, lastError: message }));
+      const saved = latest.lastError === message ? latest : await repo.update((current) => ({ ...current, lastError: message }));
+      await fleet.note(botId, saved);
       await sleep(Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)), controller.signal);
     }
   }
 }
 
-async function sweepExpiring(repo: VaultRepository, client: BotClient) {
+async function fleetView(fleet: Fleet, query: string, page: number): Promise<VaultView> {
+  const entries = (await fleet.entries()).filter((bot) => bot.active).reverse();
+  const botPages = Math.max(1, Math.ceil(entries.length / VAULT_LIMITS.adminPageSize));
+  const botPage = Math.min(Math.max(1, page), botPages);
+  const slice = entries.slice((botPage - 1) * VAULT_LIMITS.adminPageSize, botPage * VAULT_LIMITS.adminPageSize);
+  const loaded = await Promise.all(slice.map(async (entry) => ({ entry, data: await fleet.repo(entry.id).load() })));
+  for (const item of loaded) await fleet.note(item.entry.id, item.data);
+  const refreshed = (await fleet.entries()).filter((bot) => bot.active);
+  const bots = loaded.map((item) => toBot(item.entry.id, item.data));
+  const items = loaded.flatMap((item) => listedPacks(item.data, query).map((pack) => toPublic(pack, item.data.botUsername, item.entry.id)));
+  const runningCount = refreshed.filter((entry) => botRunning(entry.id)).length;
+  const packCount = refreshed.reduce((sum, entry) => sum + entry.packCount, 0);
+  const firstError = loaded.map((item) => item.data.lastError).find(Boolean);
+  const only = refreshed.length === 1 ? loaded[0] : undefined;
+  return {
+    status: {
+      connected: refreshed.length > 0,
+      running: runningCount > 0,
+      botCount: refreshed.length,
+      runningCount,
+      maxBots: VAULT_LIMITS.maxBots,
+      packCount,
+      shareLinks: refreshed.length === 0 || refreshed.every((entry) => entry.shareLinks),
+      lastError: firstError,
+      botId: only?.entry.id,
+      botName: only?.data.botName,
+      botUsername: only?.data.botUsername,
+      tokenHint: only?.data.token ? maskToken(only.data.token) : undefined,
+      channelId: only?.data.channelId,
+      channelTitle: only?.data.channelTitle,
+      seenChannels: only?.data.seenChannels ?? [],
+      connectedAt: only?.data.connectedAt,
+    },
+    bots,
+    items,
+    page: botPage,
+    pages: botPages,
+    total: refreshed.length,
+  };
+}
+
+function listedPacks(data: VaultData, query: string) {
+  const ready = data.packs.filter((pack) => pack.status === "ready" && pack.code);
+  return queryItems(
+    ready.map((pack) => ({
+      ...pack,
+      name: pack.name || "",
+      code: pack.code || "",
+      text: pack.files.map((file) => file.name).join("\n"),
+      createdAt: pack.readyAt || pack.createdAt,
+    })),
+    query,
+    1,
+    VAULT_LIMITS.maxFilesPerPack,
+  ).items;
+}
+
+function toBot(botId: string, data: VaultData): BotPublic {
+  return {
+    botId,
+    botName: data.botName,
+    botUsername: data.botUsername,
+    tokenHint: data.token ? maskToken(data.token) : undefined,
+    running: botRunning(botId),
+    enabled: data.enabled,
+    packCount: data.packs.filter((pack) => pack.status === "ready" && pack.code).length,
+    shareLinks: data.shareLinks,
+    lastError: data.lastError,
+    channelTitle: data.channelTitle,
+  };
+}
+
+async function chosenBot(value: unknown, fleet: Fleet) {
+  if (typeof value === "string" && isBotId(value)) return value;
+  const only = await onlyActive(fleet);
+  if (!only) throw new HttpError(400, "请选择机器人");
+  return only;
+}
+
+async function onlyActive(fleet: Fleet) {
+  const active = (await fleet.entries()).filter((bot) => bot.active);
+  return active.length === 1 ? active[0]?.id ?? "" : "";
+}
+
+async function sweepExpiring(repo: ReturnType<Fleet["repo"]>, client: BotClient) {
   const data = await repo.load();
   const now = Date.now();
   const due = (data.expiring ?? []).filter((item) => Date.parse(item.deleteAt) <= now);
@@ -328,6 +444,6 @@ function sleep(ms: number, signal: AbortSignal) {
       clearTimeout(timer);
       resolve();
     };
-    signal.addEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
