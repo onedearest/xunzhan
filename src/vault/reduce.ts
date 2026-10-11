@@ -88,7 +88,9 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
   }
   if (update.callback_query) return reduceCallback(data, update.callback_query, decision, options);
   const message = update.message;
-  if (!message || message.from?.is_bot) return { data, decision };
+  if (!message) return { data, decision };
+  if (message.from?.is_bot && !anonymousGroupAdmin(message)) return { data, decision };
+  if (message.from && data.botId && String(message.from.id) === data.botId) return { data, decision };
   const forwarded = forwardedChannel(message);
   const next = forwarded ? remember(data, forwarded, options.now) : data;
   const seenBefore = Boolean(forwarded && data.seenChannels.some((item) => item.id === String(forwarded.id)));
@@ -119,34 +121,42 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
       text: "这些功能请私聊我。点「存储」把文件发过来，点 ✅确认 之后再起名称。",
     });
   }
-  if (!data.shareLinks || !data.botUsername) return { data, decision };
-  const packs = codesInText([message.text, message.caption].filter(Boolean).join("\n"))
-    .slice(0, 3)
-    .flatMap((code) => {
-      const pack = readyPacks(data).find((entry) => entry.code === code);
-      return pack?.code ? [pack] : [];
-    });
-  if (!packs.length) {
-    const looked = codesInText([message.text, message.caption].filter(Boolean).join("\n"));
-    if (looked.length) {
-      decision.replies.push({
-        kind: "send",
-        chatId: String(message.chat.id),
-        replyToMessageId: message.message_id,
-        messageThreadId: threadId,
-        deleteAfterMs: 60_000,
-        text: "没有这个口令。",
-      });
-    }
-    return { data, decision };
-  }
-  decision.replies.push({
-    kind: "send",
+  const looked = codesInText([message.text, message.caption].filter(Boolean).join("\n"));
+  if (!looked.length) return { data, decision };
+  const notice = {
+    kind: "send" as const,
     chatId: String(message.chat.id),
     replyToMessageId: message.message_id,
     messageThreadId: threadId,
     deleteAfterMs: 60_000,
-    text: packs.map((pack) => `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件。点按钮打开文件夹。`).join("\n"),
+  };
+  if (!data.botUsername) {
+    decision.replies.push({
+      ...notice,
+      text: "我还不知道自己的用户名，暂时不能在群里打开文件夹。请到管理页重新接入这个机器人。",
+    });
+    return { data, decision };
+  }
+  if (!data.shareLinks) {
+    decision.replies.push({
+      ...notice,
+      text: "分享已关闭，群里不能代打开文件夹。请到管理页打开分享，或让打包的人私聊我。",
+    });
+    return { data, decision };
+  }
+  const packs = looked.slice(0, 3).flatMap((code) => {
+    const pack = readyPacks(data).find((entry) => entry.code === code);
+    return pack?.code ? [pack] : [];
+  });
+  if (!packs.length) {
+    decision.replies.push({ ...notice, text: "没有这个口令。" });
+    return { data, decision };
+  }
+  decision.replies.push({
+    ...notice,
+    text: packs
+      .map((pack) => `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件。\nhttps://t.me/${data.botUsername}?start=${pack.code}`)
+      .join("\n"),
     keyboard: packs.map((pack) => [
       {
         text: `打开「${clipName(pack.name)}」`,
@@ -155,6 +165,13 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
     ]),
   });
   return { data, decision };
+}
+
+function anonymousGroupAdmin(message: TgMessage) {
+  if (message.chat.type !== "group" && message.chat.type !== "supergroup") return false;
+  if (message.is_automatic_forward) return false;
+  if (message.from?.username?.toLowerCase() === "groupanonymousbot") return true;
+  return Boolean(message.sender_chat && String(message.sender_chat.id) === String(message.chat.id));
 }
 
 function commentThreadId(message: TgMessage) {

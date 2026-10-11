@@ -27,10 +27,10 @@ export function explainBot(error: unknown) {
     const description = error.description.toLowerCase();
     if (description.includes("chat not found")) return "找不到这个频道。请先把机器人加进去，再核对编号。";
     if (description.includes("not enough rights") || description.includes("need administrator")) {
-      return "机器人还不能在这个频道发消息。请设为管理员，并允许发布消息。";
+      return "机器人还不能发消息。请设为管理员，并允许发布消息。";
     }
     if (description.includes("bot was blocked")) return "对方已经停用了这个机器人。";
-    if (description.includes("forbidden")) return "没有权限。请把机器人设为频道管理员，并允许发布消息。";
+    if (description.includes("forbidden")) return "没有权限。请把机器人设为管理员，并允许发消息。";
     if (description.includes("too many requests") || description.includes("retry after")) {
       return "Telegram 限流了，等一会儿再试。";
     }

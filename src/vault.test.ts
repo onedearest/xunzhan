@@ -317,8 +317,40 @@ test("replies to a code in a group with a button and marks it for deletion", () 
   assert.equal(reply?.messageThreadId, 4);
   assert.equal(reply?.deleteAfterMs, 60_000);
   assert.match(reply?.text ?? "", /周报/);
+  assert.match(reply?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
   assert.equal(reply?.keyboard?.[0]?.[0]?.url, "https://t.me/storebot?start=abcdefgj");
   assert.equal(reply?.keyboard?.[0]?.[0]?.text, "打开「周报素材包」");
+  const anonymous = step(
+    saved.data,
+    update({
+      update_id: 34,
+      message: {
+        message_id: 84,
+        chat: { id: -1009, type: "supergroup", title: "讨论" },
+        from: { id: 1087968824, is_bot: true, first_name: "Group", username: "GroupAnonymousBot" },
+        sender_chat: { id: -1009, type: "supergroup", title: "讨论" },
+        text: "abcdefgj",
+      },
+    }),
+    now,
+    nextCode,
+  );
+  assert.equal(anonymous.decision.replies[0]?.keyboard?.[0]?.[0]?.url, "https://t.me/storebot?start=abcdefgj");
+  const otherBot = step(
+    saved.data,
+    update({
+      update_id: 35,
+      message: {
+        message_id: 85,
+        chat: { id: -1009, type: "supergroup" },
+        from: { id: 50, is_bot: true, username: "otherbot" },
+        text: "abcdefgj",
+      },
+    }),
+    now,
+    nextCode,
+  );
+  assert.equal(otherBot.decision.replies.length, 0);
   const comment = step(
     saved.data,
     update({
@@ -368,7 +400,7 @@ test("replies to a code in a group with a button and marks it for deletion", () 
     now,
     nextCode,
   );
-  assert.equal(hidden.decision.replies.length, 0);
+  assert.match(hidden.decision.replies[0]?.text ?? "", /分享已关闭/);
   const missing = step(
     saved.data,
     update({
@@ -384,6 +416,72 @@ test("replies to a code in a group with a button and marks it for deletion", () 
     nextCode,
   );
   assert.match(missing.decision.replies[0]?.text ?? "", /没有这个口令/);
+});
+
+test("sends the link as plain text when the group button reply is rejected", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "vault-"));
+  try {
+    const now = "2026-10-09T00:00:00.000Z";
+    const nextCode = codes();
+    const saved = finishPack(step(baseData(), privateFile(1, 10), now, nextCode).data, "周报素材包", now, nextCode);
+    const repo = createVaultRepository(dir);
+    await repo.update(() => saved.data);
+    const calls: Array<{ text: string; keyboard: boolean; reply?: number; thread?: number }> = [];
+    let attempt = 0;
+    const io: VaultIO = {
+      async copyMessage() {
+        return 1;
+      },
+      async sendMessage(_chatId, text, keyboard, _menu, _bar, replyTo) {
+        calls.push({
+          text,
+          keyboard: Boolean(keyboard?.length),
+          reply: replyTo?.messageId,
+          thread: replyTo?.threadId,
+        });
+        attempt += 1;
+        if (attempt === 1) throw new Error("message to be replied not found");
+        return 70;
+      },
+      async editMessage() {
+        return undefined;
+      },
+      async answerCallback() {
+        return undefined;
+      },
+      async deleteMessage() {
+        return undefined;
+      },
+      async deliver() {
+        return undefined;
+      },
+    };
+    await applyVaultUpdate(
+      update({
+        update_id: 40,
+        message: {
+          message_id: 80,
+          message_thread_id: 4,
+          chat: { id: -1009, type: "supergroup" },
+          from: { id: 8, first_name: "周衡" },
+          text: "abcdefgj",
+        },
+      }),
+      repo,
+      io,
+      { now, nextCode },
+    );
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0]?.reply, 80);
+    assert.equal(calls[0]?.thread, 4);
+    assert.equal(calls[1]?.keyboard, false);
+    assert.equal(calls[1]?.reply, undefined);
+    assert.equal(calls[1]?.thread, undefined);
+    assert.match(calls[1]?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
+    assert.equal(calls.some((item) => item.text.includes("没处理成")), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("does not store the same message twice", () => {

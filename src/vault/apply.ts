@@ -149,11 +149,14 @@ export async function applyVaultUpdate(
       decision = reduced.decision;
       return reduced.data;
     });
+    noteGroup(update, decision);
     await perform(decision, repo, io);
   } catch (error) {
-    const chatId = decision.replies[0]?.chatId ?? decision.deliver?.chatId;
+    const chatId = decision.replies[0]?.chatId ?? decision.deliver?.chatId ?? groupChatId(update);
+    const reason = explainBot(error) || "请再试一次";
     if (chatId) {
-      await io.sendMessage(chatId, `没处理成：${explainBot(error) || "请再试一次"}`).catch(() => undefined);
+      if (groupChatId(update)) console.error(`群回复失败 chat=${chatId} ${reason}`);
+      await io.sendMessage(chatId, `没处理成：${reason}`).catch(() => undefined);
     }
   } finally {
     await repo.update((current) => ({
@@ -178,7 +181,17 @@ async function sendReplyTrying(io: VaultIO, reply: Reply) {
   const variants = [reply];
   const withoutCopy = stripCopyButtons(reply);
   if (withoutCopy) variants.push(withoutCopy);
-  if (reply.messageThreadId) variants.push({ ...(withoutCopy ?? reply), messageThreadId: undefined });
+  if (reply.messageThreadId || reply.replyToMessageId || reply.keyboard?.length) {
+    variants.push({
+      ...reply,
+      keyboard: undefined,
+      menu: undefined,
+      bar: undefined,
+      messageThreadId: undefined,
+      replyToMessageId: undefined,
+      quiet: false,
+    });
+  }
   let last: unknown;
   for (const [index, variant] of variants.entries()) {
     try {
@@ -186,11 +199,27 @@ async function sendReplyTrying(io: VaultIO, reply: Reply) {
     } catch (error) {
       last = error;
       const detail = `${error instanceof Error ? error.message : ""} ${explainBot(error)}`.toLowerCase();
-      const retry = /button|keyboard|copy|thread|topic|parse/.test(detail);
-      if (!retry || index === variants.length - 1) throw error;
+      if (/too many requests|retry after|令牌|别的地方收消息/.test(detail) || index === variants.length - 1) throw error;
     }
   }
   throw last;
+}
+
+function groupChatId(update: TgUpdate) {
+  const chat = update.message?.chat;
+  if (!chat || chat.type === "private") return undefined;
+  return String(chat.id);
+}
+
+function noteGroup(update: TgUpdate, decision: Decision) {
+  const message = update.message;
+  if (!message || message.chat.type === "private") return;
+  const looked = [message.text, message.caption].filter(Boolean).join("\n");
+  const anonymous = message.from?.username?.toLowerCase() === "groupanonymousbot";
+  if (!looked || (!decision.replies.length && !/[a-z0-9]{8}/i.test(looked))) return;
+  console.log(
+    `群消息 chat=${message.chat.id} type=${message.chat.type} 回复=${decision.replies.length}${anonymous ? " 匿名管理员" : ""}`,
+  );
 }
 
 function stripCopyButtons(reply: Reply): Reply | undefined {
@@ -268,7 +297,7 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
             expiring: (current.expiring ?? []).filter((item) => !(item.chatId === chatId && item.messageId === messageId)),
           }))
           .catch(() => undefined);
-      }, reply.deleteAfterMs);
+      }, reply.deleteAfterMs).unref();
     }
     if (reply.trackOwnerId && typeof sent === "number") {
       const ownerId = reply.trackOwnerId;
