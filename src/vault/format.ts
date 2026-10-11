@@ -384,8 +384,6 @@ export function retrievalPlan(item: VaultFile, currentBotId?: string) {
   const sameBot = !item.botId || !currentBotId || item.botId === currentBotId;
   if (!sameBot) return "unavailable" as const;
   if (item.kind === "text" && item.text) return "text" as const;
-  const huge = typeof item.size === "number" && item.size >= ALBUM_MAX_BYTES;
-  if (huge && item.chatId && item.messageId) return "source" as const;
   if (item.fileId) return "file" as const;
   if (item.chatId && item.messageId) return "source" as const;
   return "unavailable" as const;
@@ -397,23 +395,13 @@ export type DeliveryBatch =
 
 type AlbumKind = "photo" | "video" | "document" | "audio";
 
-const ALBUM_MAX_BYTES = 50 * 1024 * 1024;
-
 function albumKind(file: VaultFile, currentBotId?: string): AlbumKind | null {
   const sameBot = !file.botId || !currentBotId || file.botId === currentBotId;
   if (!sameBot || !file.fileId) return null;
-  if (typeof file.size === "number" && file.size >= ALBUM_MAX_BYTES) return null;
   if (file.kind === "photo" || file.kind === "video" || file.kind === "document" || file.kind === "audio") {
     return file.kind;
   }
   return null;
-}
-
-function continuesAlbum(run: VaultFile[], file: VaultFile) {
-  const previous = run[run.length - 1];
-  if (!previous || previous.chatId !== file.chatId) return false;
-  if (previous.mediaGroupId || file.mediaGroupId) return previous.mediaGroupId === file.mediaGroupId;
-  return file.messageId === previous.messageId + 1;
 }
 
 function sameAlbum(left: AlbumKind, right: AlbumKind) {
@@ -434,7 +422,7 @@ export function deliveryBatches(files: VaultFile[], currentBotId?: string): Deli
   };
   for (const file of files) {
     const kind = albumKind(file, currentBotId);
-    if (!kind || (runKind && !sameAlbum(runKind, kind)) || run.length >= VAULT_LIMITS.filePageSize || (run.length > 0 && !continuesAlbum(run, file))) {
+    if (!kind || (runKind && !sameAlbum(runKind, kind)) || run.length >= VAULT_LIMITS.filePageSize) {
       flush();
     }
     if (!kind) {

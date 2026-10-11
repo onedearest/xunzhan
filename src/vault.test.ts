@@ -633,7 +633,7 @@ test("splits a retrieved pack into albums of ten", () => {
   assert.equal(batches[4]?.mode === "single" ? batches[4].file.botId : "", "1");
 });
 
-test("keeps separate albums apart and sends a huge file alone", () => {
+test("packs a folder into one album even when the files arrived separately", () => {
   const album = (group: string, ids: number[]) =>
     ids.map((messageId) => ({
       ...storedFile(messageId, "99"),
@@ -654,11 +654,10 @@ test("keeps separate albums apart and sends a huge file alone", () => {
     channelMessageId: undefined,
   };
   const batches = deliveryBatches([...album("g1", [1, 2, 3, 4]), huge, ...album("g2", [10, 11, 12])], "99");
-  assert.equal(batches.length, 3);
-  assert.equal(batches[0]?.mode === "album" ? batches[0].files.length : 0, 4);
-  assert.equal(batches[1]?.mode === "single" ? batches[1].file.fileId : "", "big");
-  assert.equal(retrievalPlan(huge, "99"), "source");
-  assert.equal(batches[2]?.mode === "album" ? batches[2].files.length : 0, 3);
+  assert.equal(batches.length, 1);
+  assert.equal(batches[0]?.mode, "album");
+  assert.equal(batches[0]?.mode === "album" ? batches[0].files.length : 0, 8);
+  assert.equal(retrievalPlan(huge, "99"), "file");
 });
 
 test("sends retrieval albums of ten and falls back one by one", async () => {
