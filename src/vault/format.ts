@@ -1,4 +1,13 @@
-import { CODE_ALPHABET, VAULT_LIMITS, type Draft, type TgMessage, type VaultFile, type VaultKind, type VaultPack } from "./types";
+import {
+  CODE_ALPHABET,
+  VAULT_LIMITS,
+  type Draft,
+  type InlineButton,
+  type TgMessage,
+  type VaultFile,
+  type VaultKind,
+  type VaultPack,
+} from "./types";
 
 export const kindLabel: Record<VaultKind, string> = {
   text: "文字",
@@ -207,6 +216,10 @@ export function nameProblem(name: string) {
   return "";
 }
 
+export function copyCodeButton(code: string): InlineButton {
+  return { text: `口令 ${code}`, copy_text: { text: code } };
+}
+
 export function savedText(pack: VaultPack, options: { username?: string; shareLinks: boolean }) {
   const lines = [
     "✅ 文件存储成功！",
@@ -215,6 +228,7 @@ export function savedText(pack: VaultPack, options: { username?: string; shareLi
     "",
     `📦 数量：${pack.files.length}`,
     `🔑 口令：${pack.code}`,
+    "点下方的口令即可复制。",
   ];
   if (options.shareLinks && options.username && pack.code) {
     lines.push(`🔗 分享链接：https://t.me/${options.username}?start=${pack.code}`);
@@ -226,12 +240,12 @@ export function savedText(pack: VaultPack, options: { username?: string; shareLi
 
 export function storeText(open?: { status: "collecting" | "naming"; count: number }) {
   if (open?.status === "naming") {
-    return `这一组有 ${open.count} 个文件。\n\n把名称发过来，我再生成编号和链接。`;
+    return `这一组有 ${open.count} 个文件。\n\n把名称发过来，我再生成口令和链接。`;
   }
   if (open?.status === "collecting") {
     return collectingText(open.count);
   }
-  return ["直接把文件、图片、视频或语音发给我，可以连续发。", "收完点底部的 ✅确认，再起个名称。我才会生成编号和链接。"].join("\n");
+  return ["直接把文件、图片、视频或语音发给我，可以连续发。", "收完点底部的 ✅确认，再起个名称。我才会生成口令和链接。"].join("\n");
 }
 
 export function searchAskText() {
@@ -244,16 +258,16 @@ export function welcomeText(options: { username?: string; shareLinks: boolean; c
     "",
     "🏠首页：看这段说明",
     "📩存储：把文件发过来。底部会换成「取消并退出」和「确认」",
-    "📩获取：按编号取回",
+    "📩获取：按口令取回",
     "📚管理文件夹：看已经打包的，自己的可以追加文件、改名称",
     "",
-    "/get 编号 取回这一组",
-    "/del 编号 删除这一组",
+    "/get 口令 取回这一组",
+    "/del 口令 删除这一组",
     "/cancel 取消还没起名的一组",
     "/stats 查看用量",
   ];
   if (options.shareLinks && options.username) {
-    lines.push("", `链接的样子：https://t.me/${options.username}?start=编号`);
+    lines.push("", `链接的样子：https://t.me/${options.username}?start=口令`);
     lines.push("打开链接就能取回这一整组。");
   } else if (!options.shareLinks) {
     lines.push("", "分享已关闭，只有打包的人自己能取回。");
@@ -274,7 +288,7 @@ export function folderText(pack: VaultPack, options: { username?: string; shareL
     "",
     "分享信息：",
     `· 名称：${clip(pack.name || "未命名", 80)}`,
-    `· 编号：${pack.code}`,
+    `· 口令：${pack.code}`,
   ];
   if (options.shareLinks && options.username && pack.code) {
     lines.push(`· 链接：https://t.me/${options.username}?start=${pack.code}`);
@@ -308,14 +322,14 @@ export function packedText(pack: VaultPack, options: { username?: string; shareL
     "",
     `名称：${clip(pack.name || "未命名", 80)}`,
     `文件：${pack.files.length} 个`,
-    `编号：${pack.code}`,
+    `口令：${pack.code}`,
     "",
     `取回：/get ${pack.code}`,
   ];
   if (options.shareLinks && options.username && pack.code) {
     lines.push(`链接：https://t.me/${options.username}?start=${pack.code}`);
   } else if (!options.shareLinks) {
-    lines.push("只有你自己能用这个编号取回。");
+    lines.push("只有你自己能用这个口令取回。");
   }
   return lines.join("\n");
 }
@@ -358,7 +372,7 @@ export function packDetailText(pack: VaultPack, options: { username?: string; sh
     ...files,
   ];
   if (shown.pages > 1) lines.push("", `第 ${shown.page}/${shown.pages} 页`);
-  lines.push("", `编号：${pack.code}`);
+  lines.push("", `口令：${pack.code}`);
   if (options.shareLinks && options.username && pack.code) {
     lines.push(`链接：https://t.me/${options.username}?start=${pack.code}`);
   }
@@ -375,7 +389,7 @@ export function statsText(packs: VaultPack[], channelTitle?: string) {
   const files = packs.reduce((sum, pack) => sum + pack.files.length, 0);
   return [
     `文件夹 ${packs.length} 个，共 ${files} 个文件`,
-    channelTitle ? `仓库频道：${channelTitle}` : "仓库频道：还没设置。编号仍然可以取回。",
+    channelTitle ? `仓库频道：${channelTitle}` : "仓库频道：还没设置。口令仍然可以取回。",
   ].join("\n");
 }
 

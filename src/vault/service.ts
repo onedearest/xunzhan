@@ -196,7 +196,7 @@ export async function forgetVault(repo: VaultRepository = vaultRepository()) {
 export async function deleteVaultItem(code: string, repo: VaultRepository = vaultRepository()) {
   const current = await repo.load();
   const pack = current.packs.find((entry) => entry.code === code);
-  if (!pack) throw new HttpError(404, "没有这个编号");
+  if (!pack) throw new HttpError(404, "没有这个口令");
   await repo.update((data) => ({ ...data, packs: data.packs.filter((entry) => entry.code !== code) }));
   if (current.token) {
     const client = new BotClient(current.token);

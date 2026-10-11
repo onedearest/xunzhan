@@ -178,6 +178,10 @@ test("keeps files in one group until the user finishes and names it", () => {
   assert.match(named.decision.replies[0]?.text ?? "", /https:\/\/t\.me\/storebot\?start=abcdefgj/);
   assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "w:new"), true);
   assert.equal(named.decision.replies[0]?.keyboard?.flat().some((button) => button.callback_data === "h"), true);
+  const copied = named.decision.replies[0]?.keyboard?.[0]?.[0];
+  assert.equal(copied?.text, "口令 abcdefgj");
+  assert.deepEqual(copied?.copy_text, { text: "abcdefgj" });
+  assert.equal(copied?.callback_data, undefined);
 });
 
 test("keeps one collecting notice when more files arrive", async () => {
@@ -305,6 +309,7 @@ test("replies to a code in a group with a button and marks it for deletion", () 
   assert.equal(reply?.deleteAfterMs, 60_000);
   assert.match(reply?.text ?? "", /周报/);
   assert.equal(reply?.keyboard?.[0]?.[0]?.url, "https://t.me/storebot?start=abcdefgj");
+  assert.deepEqual(reply?.keyboard?.[1]?.[0]?.copy_text, { text: "abcdefgj" });
   const hidden = step(
     { ...saved.data, shareLinks: false },
     update({

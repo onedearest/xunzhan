@@ -199,7 +199,7 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
     try {
       const fresh = await repo.load();
       const pack = fresh.packs.find((entry) => entry.code === decision.deliver?.code && entry.status === "ready");
-      if (!pack) throw new Error("没有这个编号");
+      if (!pack) throw new Error("没有这个口令");
       await io.deliver(decision.deliver.chatId, pack, fresh.botId);
     } catch (error) {
       const message = `取回失败：${explainBot(error) || "请再试一次"}`;

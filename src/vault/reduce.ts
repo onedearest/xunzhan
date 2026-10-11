@@ -13,6 +13,7 @@ import {
   packDetailText,
   personName,
   receiveText,
+  copyCodeButton,
   savedText,
   storeChoiceText,
   queryItems,
@@ -118,11 +119,14 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
     messageThreadId: message.message_thread_id,
     deleteAfterMs: 60_000,
     text: packs.map((pack) => `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件`).join("\n"),
-    keyboard: packs.map((pack) => [
-      {
-        text: `打开「${clipName(pack.name)}」`,
-        url: `https://t.me/${data.botUsername}?start=${pack.code}`,
-      },
+    keyboard: packs.flatMap((pack) => [
+      [
+        {
+          text: `打开「${clipName(pack.name)}」`,
+          url: `https://t.me/${data.botUsername}?start=${pack.code}`,
+        },
+      ],
+      [copyCodeButton(pack.code || "")],
     ]),
   });
   return { data, decision };
@@ -163,7 +167,7 @@ function reduceCallback(
     decision.replies.push({
       kind: "send",
       chatId,
-      text: open ? "已取消这一组，还没有编号。" : "现在没有还没起名的一组。",
+      text: open ? "已取消这一组，还没有口令。" : "现在没有还没起名的一组。",
     });
     return open ? { data: dropOpen(data, query.from.id), decision } : { data, decision };
   }
@@ -223,7 +227,7 @@ function reduceCallback(
   }
   const pack = readyPacks(data).find((entry) => entry.code === action.code);
   if (!pack?.code) {
-    decision.callbackText = "没有这个编号";
+    decision.callbackText = "没有这个口令";
     return { data, decision };
   }
   if (action.type === "manage") {
@@ -285,13 +289,14 @@ function reduceCallback(
       chatId,
       text: link
         ? `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件\n${link}\n\n把这条转给别人，对方打开就能取回。`
-        : "分享已关闭，这个编号只有打包的人能取回。",
+        : "分享已关闭，这个口令只有打包的人能取回。",
+      keyboard: pack.code ? [[copyCodeButton(pack.code)]] : undefined,
     });
     return { data, decision };
   }
   if (action.type === "get") {
     if (!canRead(data, pack, query.from.id)) {
-      decision.callbackText = "这个编号只有打包的人能取回";
+      decision.callbackText = "这个口令只有打包的人能取回";
       return { data, decision };
     }
     decision.callbackText = "已发给你";
@@ -324,7 +329,7 @@ function reduceCallback(
       kind: messageId ? "edit" : "send",
       chatId,
       messageId,
-      text: `确定删除「${pack.name}」？编号 ${pack.code}。删除后链接也会失效。`,
+      text: `确定删除「${pack.name}」？口令 ${pack.code}。删除后链接也会失效。`,
       keyboard: [
         [
           { text: "确定删除", callback_data: `y:${pack.code}` },
@@ -416,14 +421,14 @@ function reduceCommand(
   }
   if (command.name === "get") {
     if (!command.arg) {
-      decision.replies.push({ kind: "send", chatId, menu: true, text: "用法：/get 后面跟上编号。也可以点「查看文件夹（打包好的）」。" });
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "用法：/get 后面跟上口令。也可以点「查看文件夹（打包好的）」。" });
       return { data, decision };
     }
     return deliverCode(data, decision, chatId, user.id, command.arg);
   }
   if (command.name === "del") {
     if (!isVaultCode(command.arg)) {
-      decision.replies.push({ kind: "send", chatId, menu: true, text: "用法：/del 后面跟上编号。也可以在文件夹里点删除。" });
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "用法：/del 后面跟上口令。也可以在文件夹里点删除。" });
       return { data, decision };
     }
     return removePack(data, decision, chatId, user.id, command.arg);
@@ -614,6 +619,7 @@ function finishPack(data: VaultData, decision: Decision, userId: number, rawName
     menu: true,
     text: savedText(pack, { username: data.botUsername, shareLinks: data.shareLinks }),
     keyboard: [
+      [copyCodeButton(code)],
       [{ text: "➕继续新建文件夹存储内容", callback_data: "w:new" }],
       [{ text: "📩继续追加到当前文件夹", callback_data: `a:${code}` }],
       [{ text: "< 返回首页", callback_data: "h" }],
@@ -625,11 +631,11 @@ function finishPack(data: VaultData, decision: Decision, userId: number, rawName
 function deliverCode(data: VaultData, decision: Decision, chatId: string, userId: number, code: string) {
   const pack = readyPacks(data).find((entry) => entry.code === code);
   if (!pack?.code || !isVaultCode(code)) {
-    decision.replies.push({ kind: "send", chatId, text: "没有这个编号。" });
+    decision.replies.push({ kind: "send", chatId, text: "没有这个口令。" });
     return { data, decision };
   }
   if (!canRead(data, pack, userId)) {
-    decision.replies.push({ kind: "send", chatId, text: "这个编号只有打包的人能取回。" });
+    decision.replies.push({ kind: "send", chatId, text: "这个口令只有打包的人能取回。" });
     return { data, decision };
   }
   decision.deliver = { chatId, code: pack.code };
@@ -639,7 +645,7 @@ function deliverCode(data: VaultData, decision: Decision, chatId: string, userId
 function removePack(data: VaultData, decision: Decision, chatId: string, userId: number, code: string) {
   const pack = readyPacks(data).find((entry) => entry.code === code);
   if (!pack) {
-    decision.replies.push({ kind: "send", chatId, text: "没有这个编号。" });
+    decision.replies.push({ kind: "send", chatId, text: "没有这个口令。" });
     return { data, decision };
   }
   if (pack.ownerId !== String(userId)) {
@@ -687,7 +693,7 @@ function cancelOpen(data: VaultData, decision: Decision, chatId: string, userId:
     kind: "send",
     chatId,
     menu: true,
-    text: open ? "已取消这一组，还没有编号。" : "现在没有还没起名的一组。",
+    text: open ? "已取消这一组，还没有口令。" : "现在没有还没起名的一组。",
   });
   return open ? { data: dropOpen(data, userId), decision } : { data, decision };
 }
@@ -725,7 +731,7 @@ function renamePack(data: VaultData, decision: Decision, userId: number, code: s
   const pack = readyPacks(data).find((entry) => entry.code === code && entry.ownerId === String(userId));
   const name = cleanName(rawName);
   if (!pack?.code) {
-    decision.replies.push({ kind: "send", chatId, menu: true, text: "没有这个编号。" });
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "没有这个口令。" });
     return { data, decision };
   }
   const problem = nameProblem(name);
@@ -858,6 +864,7 @@ function packKeyboard(packs: VaultPack[], page: number, pages: number, viewerId:
 function folderKeyboard(pack: VaultPack) {
   const code = pack.code || "";
   return [
+    ...(code ? [[copyCodeButton(code)]] : []),
     [
       { text: "📂添加文件", callback_data: `a:${code}` },
       { text: "👀查看内容", callback_data: `v:${code}:1` },
@@ -877,7 +884,7 @@ function folderKeyboard(pack: VaultPack) {
 function detailKeyboard(pack: VaultPack, viewerId: string, page: number, pages: number) {
   const row: InlineButton[] = [{ text: "取回这一组", callback_data: `g:${pack.code}` }];
   if (pack.ownerId === viewerId) row.push({ text: "删除", callback_data: `d:${pack.code}` });
-  const rows = [row];
+  const rows: InlineButton[][] = pack.code ? [[copyCodeButton(pack.code)], row] : [row];
   const nav: InlineButton[] = [];
   if (page > 1) nav.push({ text: "上一页", callback_data: `v:${pack.code}:${page - 1}` });
   if (page < pages) nav.push({ text: "下一页", callback_data: `v:${pack.code}:${page + 1}` });
@@ -977,7 +984,7 @@ function allocateCode(packs: VaultPack[], nextCode: () => string) {
     if (!isVaultCode(code) || used.has(code)) continue;
     return code;
   }
-  throw new Error("生成编号失败");
+  throw new Error("生成口令失败");
 }
 
 function queryPacks(packs: VaultPack[], query: string, page: number, pageSize: number) {
