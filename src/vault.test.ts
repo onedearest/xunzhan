@@ -657,6 +657,7 @@ test("keeps separate albums apart and sends a huge file alone", () => {
   assert.equal(batches.length, 3);
   assert.equal(batches[0]?.mode === "album" ? batches[0].files.length : 0, 4);
   assert.equal(batches[1]?.mode === "single" ? batches[1].file.fileId : "", "big");
+  assert.equal(retrievalPlan(huge, "99"), "source");
   assert.equal(batches[2]?.mode === "album" ? batches[2].files.length : 0, 3);
 });
 

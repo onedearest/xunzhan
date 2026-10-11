@@ -86,7 +86,7 @@ export class BotClient {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body ?? {}),
-        signal,
+        signal: signal ?? AbortSignal.timeout(30_000),
       });
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;

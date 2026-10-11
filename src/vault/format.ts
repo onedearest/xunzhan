@@ -384,6 +384,8 @@ export function retrievalPlan(item: VaultFile, currentBotId?: string) {
   const sameBot = !item.botId || !currentBotId || item.botId === currentBotId;
   if (!sameBot) return "unavailable" as const;
   if (item.kind === "text" && item.text) return "text" as const;
+  const huge = typeof item.size === "number" && item.size >= ALBUM_MAX_BYTES;
+  if (huge && item.chatId && item.messageId) return "source" as const;
   if (item.fileId) return "file" as const;
   if (item.chatId && item.messageId) return "source" as const;
   return "unavailable" as const;

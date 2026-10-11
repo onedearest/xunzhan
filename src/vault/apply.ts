@@ -116,7 +116,15 @@ export async function deliverItem(client: BotClient, chatId: string, item: Vault
     return;
   }
   if (fallback === "source") {
-    await client.copyMessage(item.chatId, item.messageId, chatId);
+    try {
+      await client.copyMessage(item.chatId, item.messageId, chatId);
+      return;
+    } catch (error) {
+      if (!item.fileId) throw error;
+    }
+  }
+  if (item.fileId && (fallback === "file" || fallback === "source")) {
+    await client.sendFile(chatId, item);
     return;
   }
   throw new Error(
