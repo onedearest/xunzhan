@@ -311,6 +311,41 @@ test("replies to a code in a group with a button and marks it for deletion", () 
   assert.match(reply?.text ?? "", /周报/);
   assert.equal(reply?.keyboard?.[0]?.[0]?.url, "https://t.me/storebot?start=abcdefgj");
   assert.deepEqual(reply?.keyboard?.[1]?.[0]?.copy_text, { text: "abcdefgj" });
+  const comment = step(
+    saved.data,
+    update({
+      update_id: 32,
+      message: {
+        message_id: 82,
+        chat: { id: -1009, type: "supergroup", title: "评论" },
+        from: { id: 8, first_name: "周衡" },
+        text: "口令 abcdefgj",
+        reply_to_message: { message_id: 55, is_automatic_forward: true, sender_chat: { id: -1001, type: "channel", title: "频道" } },
+      },
+    }),
+    now,
+    nextCode,
+  );
+  const commentReply = comment.decision.replies[0];
+  assert.equal(commentReply?.replyToMessageId, 82);
+  assert.equal(commentReply?.messageThreadId, 55);
+  assert.equal(commentReply?.keyboard?.[0]?.[0]?.url, "https://t.me/storebot?start=abcdefgj");
+  const mirrored = step(
+    saved.data,
+    update({
+      update_id: 33,
+      message: {
+        message_id: 83,
+        chat: { id: -1009, type: "supergroup" },
+        is_automatic_forward: true,
+        text: "abcdefgj",
+        sender_chat: { id: -1001, type: "channel", title: "频道" },
+      },
+    }),
+    now,
+    nextCode,
+  );
+  assert.equal(mirrored.decision.replies.length, 0);
   const hidden = step(
     { ...saved.data, shareLinks: false },
     update({

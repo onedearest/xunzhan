@@ -76,7 +76,7 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
   }
   if (update.callback_query) return reduceCallback(data, update.callback_query, decision, options);
   const message = update.message;
-  if (!message?.from || message.from.is_bot) return { data, decision };
+  if (!message || message.from?.is_bot) return { data, decision };
   const forwarded = forwardedChannel(message);
   const next = forwarded ? remember(data, forwarded, options.now) : data;
   const seenBefore = Boolean(forwarded && data.seenChannels.some((item) => item.id === String(forwarded.id)));
@@ -84,8 +84,10 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
     decision.channelHint = `这个频道的编号是 ${forwarded.id}。可以在网页里把它设成仓库。`;
   }
   if (message.chat.type !== "private") {
+    if (message.is_automatic_forward) return { data: next, decision };
     return reduceGroup(next, message, decision);
   }
+  if (!message.from) return { data: next, decision };
   const command = commandOf(message.text);
   if (command) return reduceCommand(clearPrompt(next, message.from.id), message, command, decision);
   const action = message.text ? menuAction(message.text) : null;
@@ -94,13 +96,14 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
 }
 
 function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
+  const threadId = commentThreadId(message);
   const command = commandOf(message.text);
   if (command && ["start", "help", "store", "folders", "list", "search"].includes(command.name)) {
     decision.replies.push({
       kind: "send",
       chatId: String(message.chat.id),
       replyToMessageId: message.message_id,
-      messageThreadId: message.message_thread_id,
+      messageThreadId: threadId,
       text: "这些功能请私聊我。点「存储」把文件发过来，点 ✅确认 之后再起名称。",
     });
   }
@@ -116,9 +119,9 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
     kind: "send",
     chatId: String(message.chat.id),
     replyToMessageId: message.message_id,
-    messageThreadId: message.message_thread_id,
+    messageThreadId: threadId,
     deleteAfterMs: 60_000,
-    text: packs.map((pack) => `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件`).join("\n"),
+    text: packs.map((pack) => `「${pack.name || "未命名"}」共 ${pack.files.length} 个文件。点按钮打开文件夹。`).join("\n"),
     keyboard: packs.flatMap((pack) => [
       [
         {
@@ -130,6 +133,22 @@ function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
     ]),
   });
   return { data, decision };
+}
+
+function commentThreadId(message: TgMessage) {
+  if (message.message_thread_id) return message.message_thread_id;
+  const reply = message.reply_to_message;
+  if (!reply) return undefined;
+  if (reply.message_thread_id) return reply.message_thread_id;
+  if (
+    reply.is_automatic_forward ||
+    reply.sender_chat?.type === "channel" ||
+    reply.forward_from_chat?.type === "channel" ||
+    reply.forward_origin?.type === "channel"
+  ) {
+    return reply.message_id;
+  }
+  return undefined;
 }
 
 function reduceCallback(

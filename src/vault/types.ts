@@ -77,8 +77,17 @@ export type TgMessage = {
     message_id?: number;
   };
   forward_from_chat?: TgChat;
+  sender_chat?: TgChat;
+  is_automatic_forward?: boolean;
   message_thread_id?: number;
-  reply_to_message?: { message_id: number };
+  reply_to_message?: {
+    message_id: number;
+    message_thread_id?: number;
+    is_automatic_forward?: boolean;
+    sender_chat?: TgChat;
+    forward_from_chat?: TgChat;
+    forward_origin?: { type?: string; chat?: TgChat };
+  };
 };
 
 export type TgCallback = {
