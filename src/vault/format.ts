@@ -156,16 +156,14 @@ export function menuKeyboard(admin = true) {
   return [top, [{ text: MENU.store }, { text: MENU.folders }]];
 }
 
-export function storeAdmins(data: { adminIds?: string[]; packs: { ownerId: string }[] }) {
-  const listed = (data.adminIds ?? []).filter((id) => /^\d{1,16}$/.test(id));
-  if (listed.length) return [...new Set(listed)];
-  return [...new Set(data.packs.map((pack) => pack.ownerId).filter((id) => /^\d{1,16}$/.test(id)))];
+export function storageUsers(data: { adminIds?: string[] }) {
+  return [...new Set((data.adminIds ?? []).filter((id) => /^\d{1,16}$/.test(id)))];
 }
 
-export function canStore(data: { adminIds?: string[]; packs: { ownerId: string }[] }, userId: number | string) {
-  const admins = storeAdmins(data);
-  if (!admins.length) return true;
-  return admins.includes(String(userId));
+export function canStore(data: { ownerId?: string; adminIds?: string[] }, userId: number | string) {
+  const id = String(userId);
+  if (data.ownerId && data.ownerId === id) return true;
+  return storageUsers(data).includes(id);
 }
 
 export const COLLECT = {
@@ -274,9 +272,17 @@ export function searchAskText() {
   return "把关键词发过来。我在已经打包的文件夹里按名称找。";
 }
 
-export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean; readsAllGroupMessages?: boolean; canStore?: boolean }) {
+export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean; readsAllGroupMessages?: boolean; canStore?: boolean; userId?: string }) {
   if (options.canStore === false) {
-    const lines = ["把口令发过来就能取回文件。", "", "📩获取：按口令取回", "📚管理文件夹：看已经分享的文件夹", "", "/get 口令"];
+    const lines = [
+      "把口令发过来就能取回文件。",
+      "",
+      "📩获取：按口令取回",
+      "📚管理文件夹：看已经分享的文件夹",
+      "",
+      "/get 口令",
+    ];
+    if (options.userId) lines.push("", `你的用户编号是 ${options.userId}。只有创建者，或被添加了这个编号的人，才能存储。`);
     if (options.shareLinks && options.username) lines.push("", `链接的样子：https://t.me/${options.username}?start=口令`);
     return lines.join("\n");
   }

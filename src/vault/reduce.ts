@@ -290,6 +290,7 @@ function reduceCallback(
         shareLinks: data.shareLinks,
         channelBound: Boolean(data.channelId),
         canStore: canStore(data, query.from.id),
+        userId: String(query.from.id),
       }),
     });
     return { data, decision };
@@ -463,6 +464,7 @@ function reduceCommand(
           channelBound: Boolean(data.channelId),
           readsAllGroupMessages: data.readsAllGroupMessages,
           canStore: canStore(data, user.id),
+          userId: String(user.id),
         }),
         decision,
       ),
@@ -1029,12 +1031,12 @@ function visiblePacks(data: VaultData, userId: number) {
 }
 
 function denyStore(data: VaultData, decision: Decision, chatId: string, userId: number) {
-  decision.callbackText = "只有管理员可以存储";
+  decision.callbackText = "只有创建者或已添加的用户可以存储";
   decision.replies.push({
     kind: "send",
     chatId,
     menu: true,
-    text: "只有管理员可以存储。需要取回时，把口令发给我。",
+    text: `只有创建者，或被添加了用户编号的人，才能存储。\n你的用户编号是 ${userId}。需要取回时，把口令发给我。`,
   });
   return { data: releaseOpen(data, userId), decision };
 }

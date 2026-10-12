@@ -28,7 +28,7 @@ export function homePage() {
   <ol>
     <li>在 @BotFather 发送 /newbot，复制整段令牌。</li>
     <li>贴到下面，点开始接收。这台机器要一直开着。</li>
-    <li>打开机器人。底部是获取、首页、存储、管理文件夹。只有管理员能存储，别人用口令取回。</li>
+    <li>打开机器人。创建者拥有这个机器人。其他要存储的人，必须先添加他的 Telegram 用户编号。</li>
   </ol>
   <section id="status">正在读取…</section>
   <form id="form">
@@ -108,22 +108,39 @@ function draw(data) {
       }
     }));
     const admins = document.createElement("div");
+    const ownerRow = document.createElement("div");
+    ownerRow.className = "row";
+    const ownerInput = document.createElement("input");
+    ownerInput.type = "text";
+    ownerInput.className = "id";
+    ownerInput.placeholder = "创建者用户编号";
+    ownerInput.autocomplete = "off";
+    ownerInput.value = bot.ownerId || "";
+    ownerRow.append(ownerInput, button("保存创建者", "", async () => {
+      errorEl.textContent = "";
+      try {
+        draw(await api("/api/vault/owner", { method: "POST", body: JSON.stringify({ botId: bot.botId, ownerId: ownerInput.value.trim() }) }));
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    }));
+    admins.append(ownerRow);
+    const ownerNote = document.createElement("p");
+    ownerNote.textContent = bot.ownerId ? "创建者 " + bot.ownerId + " 拥有这个机器人，可以存储。" : "还没有创建者。私聊机器人发 /start，把看到的用户编号填在这里。";
+    admins.append(ownerNote);
     for (const adminId of bot.adminIds || []) {
       const adminRow = document.createElement("div");
       adminRow.className = "row";
       const who = document.createElement("p");
-      who.textContent = "管理员 " + adminId;
-      adminRow.append(who);
-      if ((bot.adminIds || []).length > 1) {
-        adminRow.append(button("取消", "ghost", async () => {
-          errorEl.textContent = "";
-          try {
-            draw(await api("/api/vault/admins", { method: "POST", body: JSON.stringify({ botId: bot.botId, adminId, allow: false }) }));
-          } catch (error) {
-            errorEl.textContent = error.message;
-          }
-        }));
-      }
+      who.textContent = "可存储 " + adminId;
+      adminRow.append(who, button("取消", "ghost", async () => {
+        errorEl.textContent = "";
+        try {
+          draw(await api("/api/vault/admins", { method: "POST", body: JSON.stringify({ botId: bot.botId, adminId, allow: false }) }));
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      }));
       admins.append(adminRow);
     }
     const add = document.createElement("div");
@@ -131,9 +148,9 @@ function draw(data) {
     const adminInput = document.createElement("input");
     adminInput.type = "text";
     adminInput.className = "id";
-    adminInput.placeholder = "Telegram 用户编号";
+    adminInput.placeholder = "可存储的用户编号";
     adminInput.autocomplete = "off";
-    add.append(adminInput, button("添加管理员", "", async () => {
+    add.append(adminInput, button("添加用户", "", async () => {
       errorEl.textContent = "";
       try {
         draw(await api("/api/vault/admins", { method: "POST", body: JSON.stringify({ botId: bot.botId, adminId: adminInput.value.trim(), allow: true }) }));

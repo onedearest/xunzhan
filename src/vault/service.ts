@@ -3,7 +3,7 @@ import { HttpError } from "../http";
 import { applyVaultUpdate, ioFromClient } from "./apply";
 import { BotApiError, BotClient, canPostInChannel, explainBot } from "./bot-client";
 import { botIdFromToken, fleetStore, isBotId, type Fleet } from "./fleet";
-import { canStore, maskToken, normalizeChannel, queryItems, storeAdmins } from "./format";
+import { canStore, maskToken, normalizeChannel, queryItems, storageUsers } from "./format";
 import {
   VAULT_LIMITS,
   type BotPublic,
@@ -220,11 +220,20 @@ export async function setVaultAdmins(
   if (!/^\d{1,16}$/.test(adminId)) throw new HttpError(400, "管理员编号是一串数字");
   const allow = input.allow !== false;
   const saved = await fleet.repo(botId).update((data) => {
-    const current = storeAdmins(data);
+    const current = storageUsers(data);
     const next = allow ? [...new Set([...current, adminId])] : current.filter((id) => id !== adminId);
-    if (!next.length) throw new HttpError(400, "至少留一个管理员");
     return { ...data, adminIds: next };
   });
+  await fleet.note(botId, saved);
+  return fleetView(fleet, "", 1);
+}
+
+export async function setVaultOwner(input: { botId?: unknown; ownerId?: unknown }, fleet: Fleet = fleetStore()) {
+  await fleet.prepare();
+  const botId = await chosenBot(input.botId, fleet);
+  const ownerId = typeof input.ownerId === "string" ? input.ownerId.trim() : "";
+  if (!/^\d{1,16}$/.test(ownerId)) throw new HttpError(400, "创建者编号是一串数字");
+  const saved = await fleet.repo(botId).update((data) => ({ ...data, ownerId }));
   await fleet.note(botId, saved);
   return fleetView(fleet, "", 1);
 }
@@ -420,7 +429,8 @@ function toBot(botId: string, data: VaultData): BotPublic {
     enabled: data.enabled,
     packCount: data.packs.filter((pack) => pack.status === "ready" && pack.code).length,
     shareLinks: data.shareLinks,
-    adminIds: storeAdmins(data),
+    ownerId: data.ownerId,
+    adminIds: storageUsers(data),
     lastError: data.lastError,
     channelTitle: data.channelTitle,
   };

@@ -32,6 +32,7 @@ export function createVaultRepository(dir: string): VaultRepository {
         channelId: parsed.channelId,
         channelTitle: parsed.channelTitle,
         shareLinks: parsed.shareLinks !== false,
+        ownerId: readUserId(parsed.ownerId),
         adminIds: readAdminIds(parsed.adminIds),
         offset: typeof parsed.offset === "number" ? parsed.offset : 0,
         packs: Array.isArray(parsed.packs) ? parsed.packs : [],
@@ -70,6 +71,10 @@ export function createVaultRepository(dir: string): VaultRepository {
       });
     },
   };
+}
+
+function readUserId(value: unknown) {
+  return typeof value === "string" && /^\d{1,16}$/.test(value) ? value : undefined;
 }
 
 function readAdminIds(value: unknown) {

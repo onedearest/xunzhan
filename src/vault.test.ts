@@ -75,6 +75,7 @@ function baseData(extra?: Partial<VaultData>): VaultData {
     ...emptyVault(),
     botId: "99",
     botUsername: "storebot",
+    ownerId: "7",
     ...extra,
   };
 }
@@ -503,22 +504,27 @@ test("only an admin can store once a folder exists", () => {
     document: { file_id: "file-30", file_name: "外来.pdf", file_size: 20, mime_type: "application/pdf" },
   };
   const stranger = step(saved.data, update({ update_id: 30, message: incoming }), now, nextCode);
-  assert.match(stranger.decision.replies[0]?.text ?? "", /只有管理员/);
+  assert.match(stranger.decision.replies[0]?.text ?? "", /才能存储/);
+  assert.match(stranger.decision.replies[0]?.text ?? "", /用户编号是 8/);
   assert.equal(stranger.decision.replies[0]?.guest, true);
   assert.equal(stranger.data.packs.length, 1);
   assert.equal(stranger.data.packs[0]?.status, "ready");
   const menu = step(saved.data, textMessage(31, 31, "📩存储", 8), now, nextCode);
-  assert.match(menu.decision.replies[0]?.text ?? "", /只有管理员/);
+  assert.match(menu.decision.replies[0]?.text ?? "", /才能存储/);
   const hello = step(saved.data, textMessage(32, 32, "/start", 8), now, nextCode);
   assert.equal(hello.decision.replies[0]?.guest, true);
   assert.match(hello.decision.replies[0]?.text ?? "", /把口令发过来/);
+  assert.match(hello.decision.replies[0]?.text ?? "", /用户编号是 8/);
   assert.doesNotMatch(hello.decision.replies[0]?.text ?? "", /取消并退出/);
   const owner = step(saved.data, privateFile(33, 33, "再存.pdf"), now, nextCode);
   assert.equal(owner.data.packs.some((pack) => pack.status === "collecting" && pack.ownerId === "7"), true);
-  const locked = { ...saved.data, adminIds: ["8"] };
-  const blockedOwner = step(locked, privateFile(34, 34), now, nextCode);
-  assert.match(blockedOwner.decision.replies[0]?.text ?? "", /只有管理员/);
-  assert.equal(blockedOwner.data.packs.filter((pack) => pack.status === "ready").length, 1);
+  const unset = step(baseData({ ownerId: undefined }), privateFile(36, 36), now, nextCode);
+  assert.match(unset.decision.replies[0]?.text ?? "", /才能存储/);
+  assert.equal(unset.data.packs.length, 0);
+  const locked = { ...saved.data, ownerId: "9", adminIds: ["8"] };
+  const blocked = step(locked, privateFile(34, 34), now, nextCode);
+  assert.match(blocked.decision.replies[0]?.text ?? "", /才能存储/);
+  assert.equal(blocked.data.packs.filter((pack) => pack.status === "ready").length, 1);
   const allowed = step(locked, update({ update_id: 35, message: { ...incoming, message_id: 35 } }), now, nextCode);
   assert.equal(allowed.data.packs.some((pack) => pack.ownerId === "8" && pack.status === "collecting"), true);
 });

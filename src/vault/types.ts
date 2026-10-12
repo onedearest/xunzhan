@@ -174,6 +174,7 @@ export type VaultData = {
   channelId?: string;
   channelTitle?: string;
   shareLinks: boolean;
+  ownerId?: string;
   adminIds?: string[];
   offset: number;
   packs: VaultPack[];
@@ -225,6 +226,7 @@ export type BotPublic = {
   enabled: boolean;
   packCount: number;
   shareLinks: boolean;
+  ownerId?: string;
   adminIds: string[];
   lastError?: string;
   channelTitle?: string;

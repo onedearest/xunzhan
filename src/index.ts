@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { HttpError } from "./http";
 import { homePage } from "./page";
 import { openFileLimit } from "./vault/fleet";
-import { connectVault, deleteVaultItem, forgetVault, pauseVault, resumeVault, setVaultAdmins, vaultView } from "./vault/service";
+import { connectVault, deleteVaultItem, forgetVault, pauseVault, resumeVault, setVaultAdmins, setVaultOwner, vaultView } from "./vault/service";
 import { VAULT_LIMITS } from "./vault/types";
 
 const port = Number(process.env.PORT || 43128);
@@ -45,6 +45,10 @@ async function dispatch(request: Request): Promise<Response> {
     if (pathname === "/api/vault/forget" && method === "POST") {
       const body = (await request.json().catch(() => ({}))) as { botId?: unknown };
       return json(await forgetVault(body));
+    }
+    if (pathname === "/api/vault/owner" && method === "POST") {
+      const body = (await request.json().catch(() => ({}))) as { botId?: unknown; ownerId?: unknown };
+      return json(await setVaultOwner(body));
     }
     if (pathname === "/api/vault/admins" && method === "POST") {
       const body = (await request.json().catch(() => ({}))) as { botId?: unknown; adminId?: unknown; allow?: unknown };
