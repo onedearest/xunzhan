@@ -156,7 +156,20 @@ export type SeenChannel = {
 
 export type UserPrompt =
   | { ownerId: string; kind: "search" }
-  | { ownerId: string; kind: "rename"; code: string };
+  | { ownerId: string; kind: "rename"; code: string }
+  | { ownerId: string; kind: "guest-home" };
+
+export type SeenUser = {
+  id: string;
+  firstSeen: string;
+  lastSeen: string;
+  prevSeen?: string;
+};
+
+export type DeliveryDay = {
+  day: string;
+  count: number;
+};
 
 export type ExpiringNotice = {
   chatId: string;
@@ -176,6 +189,11 @@ export type VaultData = {
   shareLinks: boolean;
   ownerId?: string;
   adminIds?: string[];
+  guestHome?: string;
+  openedAt?: string;
+  seenUsers: SeenUser[];
+  deliveries: number;
+  deliveryDays: DeliveryDay[];
   offset: number;
   packs: VaultPack[];
   seenChannels: SeenChannel[];
@@ -250,6 +268,9 @@ export function emptyVault(): VaultData {
     offset: 0,
     packs: [],
     seenChannels: [],
+    seenUsers: [],
+    deliveries: 0,
+    deliveryDays: [],
     prompts: [],
     expiring: [],
   };

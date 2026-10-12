@@ -179,6 +179,7 @@ export async function connectVault(
     shareLinks: typeof input.shareLinks === "boolean" ? input.shareLinks : data.shareLinks,
     offset: sameBot ? data.offset : 0,
     lastError: undefined,
+    openedAt: data.openedAt || new Date().toISOString(),
     connectedAt: new Date().toISOString(),
   }));
   await fleet.note(botId, saved);

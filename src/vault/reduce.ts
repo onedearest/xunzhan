@@ -15,6 +15,9 @@ import {
   receiveText,
   canStore,
   copyCodeButton,
+  guestHomeText,
+  noteVisit,
+  ownerHomeText,
   savedText,
   storeChoiceText,
   queryItems,
@@ -89,7 +92,9 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
     return { data: remember(data, update.channel_post.chat, options.now), decision };
   }
   if (update.callback_query) {
-    const result = reduceCallback(data, update.callback_query, decision, options);
+    const chat = update.callback_query.message?.chat;
+    const visited = !chat || chat.type === "private" ? rememberUser(data, update.callback_query.from, options.now) : data;
+    const result = reduceCallback(visited, update.callback_query, decision, options);
     paintGuestMenu(result.data, update.callback_query.from.id, result.decision);
     return result;
   }
@@ -108,11 +113,17 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
     return reduceGroup(next, message, decision);
   }
   if (!message.from) return { data: next, decision };
+  const visited = rememberUser(next, message.from, options.now);
   const command = commandOf(message.text);
-  if (command) return finishPrivate(reduceCommand(clearPrompt(next, message.from.id), message, command, decision), message.from.id);
+  if (command) return finishPrivate(reduceCommand(clearPrompt(visited, message.from.id), message, command, decision, options.now), message.from.id);
   const action = message.text ? menuAction(message.text) : null;
-  if (action) return finishPrivate(reduceCommand(clearPrompt(next, message.from.id), message, { name: action, arg: "" }, decision), message.from.id);
-  return finishPrivate(reduceIncoming(next, message, decision, options), message.from.id);
+  if (action) return finishPrivate(reduceCommand(clearPrompt(visited, message.from.id), message, { name: action, arg: "" }, decision, options.now), message.from.id);
+  return finishPrivate(reduceIncoming(visited, message, decision, options), message.from.id);
+}
+
+function rememberUser(data: VaultData, user: TgUser | undefined, now: string) {
+  if (!user || user.is_bot) return data;
+  return noteVisit(data, String(user.id), now);
 }
 
 function finishPrivate(result: { data: VaultData; decision: Decision }, userId: number) {
@@ -281,6 +292,10 @@ function reduceCallback(
   }
   if (action.type === "home") {
     decision.callbackText = "首页";
+    return showHome(data, decision, chatId, query.from, options.now);
+  }
+  if (action.type === "usage") {
+    decision.callbackText = "使用说明";
     decision.replies.push({
       kind: "send",
       chatId,
@@ -289,11 +304,26 @@ function reduceCallback(
         username: data.botUsername,
         shareLinks: data.shareLinks,
         channelBound: Boolean(data.channelId),
+        readsAllGroupMessages: data.readsAllGroupMessages,
         canStore: canStore(data, query.from.id),
         userId: String(query.from.id),
       }),
     });
     return { data, decision };
+  }
+  if (action.type === "edit-ad") {
+    if (data.ownerId !== String(query.from.id)) {
+      decision.callbackText = "只有创建者可以设置";
+      return { data, decision };
+    }
+    decision.callbackText = "把文案发过来";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: "把普通用户首页要显示的广告文案发过来。可以换行。发送「清空」就恢复默认。",
+    });
+    return { data: askGuestHome(data, query.from.id), decision };
   }
   if (action.type === "list") {
     const listed = queryPacks(visiblePacks(data, query.from.id), "", action.page, VAULT_LIMITS.userPageSize);
@@ -438,6 +468,7 @@ function reduceCommand(
   message: TgMessage,
   command: { name: string; arg: string },
   decision: Decision,
+  now: string,
 ): { data: VaultData; decision: Decision } {
   const chatId = String(message.chat.id);
   const user = message.from as TgUser;
@@ -447,29 +478,14 @@ function reduceCommand(
       message,
       { name: command.name === "put" ? "store" : "folders", arg: command.arg },
       decision,
+      now,
     );
   }
   if (command.name === "start" && command.arg) {
     return deliverCode(data, decision, chatId, user.id, command.arg);
   }
   if (command.name === "start" || command.name === "help") {
-    decision.replies.push({
-      kind: "send",
-      chatId,
-      menu: true,
-      text: withHint(
-        welcomeText({
-          username: data.botUsername,
-          shareLinks: data.shareLinks,
-          channelBound: Boolean(data.channelId),
-          readsAllGroupMessages: data.readsAllGroupMessages,
-          canStore: canStore(data, user.id),
-          userId: String(user.id),
-        }),
-        decision,
-      ),
-    });
-    return { data, decision };
+    return showHome(data, decision, chatId, user, now);
   }
   if (command.name === "store") {
     if (!canStore(data, user.id)) return denyStore(data, decision, chatId, user.id);
@@ -571,6 +587,9 @@ function reduceIncoming(
   const open = openPack(data, user.id);
   const draft = draftFromMessage(message);
   const prompt = (data.prompts ?? []).find((item) => item.ownerId === String(user.id));
+  if (prompt?.kind === "guest-home") {
+    return saveGuestHome(data, decision, chatId, user.id, draft?.kind === "text" ? draft.text : undefined);
+  }
   if (prompt?.kind === "search" && draft?.kind === "text" && draft.text) {
     return searchPacks(clearPrompt(data, user.id), decision, chatId, user.id, draft.text);
   }
@@ -750,6 +769,62 @@ function clearPrompt(data: VaultData, userId: number): VaultData {
   const prompts = (data.prompts ?? []).filter((item) => item.ownerId !== String(userId));
   if (prompts.length === (data.prompts ?? []).length) return data;
   return { ...data, prompts };
+}
+
+function showHome(data: VaultData, decision: Decision, chatId: string, user: TgUser, now: string) {
+  if (data.ownerId && data.ownerId === String(user.id)) {
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: withHint(ownerHomeText(data, now), decision),
+      keyboard: [
+        [{ text: "✏️ 设置用户首页文案", callback_data: "ad" }],
+        [{ text: "📖 使用说明", callback_data: "p" }],
+      ],
+    });
+    return { data, decision };
+  }
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    menu: true,
+    text: withHint(guestHomeText(data, String(user.id)), decision),
+  });
+  return { data, decision };
+}
+
+function askGuestHome(data: VaultData, userId: number): VaultData {
+  const prompts = (data.prompts ?? []).filter((item) => item.ownerId !== String(userId));
+  return { ...data, prompts: [...prompts, { ownerId: String(userId), kind: "guest-home" }] };
+}
+
+function saveGuestHome(data: VaultData, decision: Decision, chatId: string, userId: number, raw?: string) {
+  if (data.ownerId !== String(userId)) {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "只有创建者可以设置用户首页。" });
+    return { data: clearPrompt(data, userId), decision };
+  }
+  const text = raw?.trim() ?? "";
+  if (!text) {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "文案是一段文字。把广告发过来，或发送「清空」。" });
+    return { data, decision };
+  }
+  if (text === "清空") {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "已恢复默认的用户首页。" });
+    return { data: { ...clearPrompt(data, userId), guestHome: undefined }, decision };
+  }
+  if (text.startsWith("/") || menuAction(text)) {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "这是菜单或命令，不能当成广告。请另写一段文案。" });
+    return { data: clearPrompt(data, userId), decision };
+  }
+  const copy = text.slice(0, 500);
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    menu: true,
+    text: copy.length < text.length ? "用户首页文案已更新，超长的部分没有保存。" : "用户首页文案已更新。普通用户点首页会看到这段。",
+  });
+  return { data: { ...clearPrompt(data, userId), guestHome: copy }, decision };
 }
 
 function askSearch(data: VaultData, userId: number): VaultData {
@@ -992,6 +1067,8 @@ function parseAction(data: string) {
   if (data === "w:add") return { type: "add-recent" as const };
   if (data === "w:close") return { type: "close-store" as const };
   if (data === "h") return { type: "home" as const };
+  if (data === "p") return { type: "usage" as const };
+  if (data === "ad") return { type: "edit-ad" as const };
   if (data === "c") return { type: "continue" as const };
   if (data === "e") return { type: "finish" as const };
   if (data === "z") return { type: "drop" as const };

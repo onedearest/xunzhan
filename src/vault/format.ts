@@ -4,6 +4,7 @@ import {
   type Draft,
   type InlineButton,
   type TgMessage,
+  type VaultData,
   type VaultFile,
   type VaultKind,
   type VaultPack,
@@ -270,6 +271,97 @@ export function storeText(open?: { status: "collecting" | "naming"; count: numbe
 
 export function searchAskText() {
   return "把关键词发过来。我在已经打包的文件夹里按名称找。";
+}
+
+export function shanghaiDay(iso: string) {
+  const time = Date.parse(iso);
+  const shifted = new Date((Number.isFinite(time) ? time : Date.now()) + 8 * 60 * 60 * 1000);
+  return shifted.toISOString().slice(0, 10);
+}
+
+export function shiftDay(day: string, days: number) {
+  const time = Date.parse(`${day}T00:00:00.000Z`);
+  return new Date(time + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+export function noteVisit(data: VaultData, userId: string, now: string): VaultData {
+  if (!/^\d{1,16}$/.test(userId)) return data;
+  const users = data.seenUsers ?? [];
+  const found = users.find((user) => user.id === userId);
+  if (found) {
+    if (found.lastSeen === now) return data;
+    const sameDay = shanghaiDay(found.lastSeen) === shanghaiDay(now);
+    const next = sameDay ? { ...found, lastSeen: now } : { ...found, prevSeen: found.lastSeen, lastSeen: now };
+    return { ...data, seenUsers: users.map((user) => (user.id === userId ? next : user)) };
+  }
+  if (users.length >= 20000) return data;
+  return { ...data, seenUsers: [...users, { id: userId, firstSeen: now, lastSeen: now }] };
+}
+
+export function noteDelivery(data: VaultData, count: number, now: string): VaultData {
+  if (!Number.isFinite(count) || count <= 0) return data;
+  const added = Math.floor(count);
+  const day = shanghaiDay(now);
+  const days = data.deliveryDays ?? [];
+  const existing = days.find((item) => item.day === day);
+  const next = existing
+    ? days.map((item) => (item.day === day ? { ...item, count: item.count + added } : item))
+    : [...days, { day, count: added }];
+  const keepFrom = shiftDay(day, -40);
+  return {
+    ...data,
+    deliveries: (data.deliveries ?? 0) + added,
+    deliveryDays: next.filter((item) => item.day >= keepFrom).slice(-40),
+  };
+}
+
+function operatingStart(data: VaultData) {
+  const stamps = [data.openedAt, data.connectedAt, ...data.packs.map((pack) => pack.createdAt)].filter(
+    (item): item is string => typeof item === "string" && item.length > 0,
+  );
+  if (!stamps.length) return undefined;
+  return stamps.reduce((earliest, item) => (item < earliest ? item : earliest));
+}
+
+export function ownerHomeText(data: VaultData, now: string) {
+  const day = shanghaiDay(now);
+  const yesterday = shiftDay(day, -1);
+  const files = data.packs.filter((pack) => pack.status === "ready").reduce((sum, pack) => sum + pack.files.length, 0);
+  const users = data.seenUsers ?? [];
+  const start = operatingStart(data);
+  const days = start ? Math.floor((Date.parse(day) - Date.parse(shanghaiDay(start))) / 86400000) + 1 : 1;
+  const yesterdaySent = (data.deliveryDays ?? []).find((item) => item.day === yesterday)?.count ?? 0;
+  return [
+    "⚙️ 管理员设置菜单（创建者能看到）",
+    `📁Bot已存文件数：${files}`,
+    "",
+    `📊Bot 运营数据（截止到 ${day}）`,
+    `累计运营时间：${days} 天`,
+    `累计用户数：${users.length}`,
+    "会员数：0",
+    `昨日新增用户数：${users.filter((user) => shanghaiDay(user.firstSeen) === yesterday).length}`,
+    `昨日访问用户数：${users.filter((user) => shanghaiDay(user.lastSeen) === yesterday || (user.prevSeen ? shanghaiDay(user.prevSeen) === yesterday : false)).length}`,
+    `累计下发文件次数：${data.deliveries ?? 0}`,
+    `昨日下发文件次数：${yesterdaySent}`,
+    "",
+    "💴账户余额：$ 0.00",
+    "提现中：$ 0.00",
+    "已提结：$ 0.00",
+  ].join("\n");
+}
+
+export function guestHomeText(data: VaultData, userId: string) {
+  const custom = data.guestHome?.trim();
+  const lines = [
+    custom ||
+      ["把口令发过来就能取回文件。", "", "📩获取：按口令取回", "📚管理文件夹：看已经分享的文件夹", "", "/get 口令"].join("\n"),
+  ];
+  if (!canStore(data, userId)) {
+    lines.push("", `你的用户编号是 ${userId}。只有创建者，或被添加了这个编号的人，才能存储。`);
+  } else if (data.ownerId !== userId) {
+    lines.push("", "你已被允许存储。");
+  }
+  return lines.join("\n");
 }
 
 export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean; readsAllGroupMessages?: boolean; canStore?: boolean; userId?: string }) {

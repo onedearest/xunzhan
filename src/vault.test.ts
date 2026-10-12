@@ -529,6 +529,43 @@ test("only an admin can store once a folder exists", () => {
   assert.equal(allowed.data.packs.some((pack) => pack.ownerId === "8" && pack.status === "collecting"), true);
 });
 
+test("shows the creator a dashboard and everyone else the custom home text", () => {
+  const nextCode = codes();
+  const now = "2026-10-11T02:00:00.000Z";
+  const saved = finishPack(step(baseData(), privateFile(1, 10), "2026-06-21T00:00:00.000Z", nextCode).data, "周报素材包", "2026-06-21T00:00:00.000Z", nextCode);
+  const data = {
+    ...saved.data,
+    openedAt: "2026-06-21T00:00:00.000Z",
+    seenUsers: [{ id: "8", firstSeen: "2026-10-10T01:00:00.000Z", lastSeen: "2026-10-10T01:00:00.000Z" }],
+    deliveries: 10,
+    deliveryDays: [{ day: "2026-10-10", count: 4 }],
+  };
+  const home = step(data, textMessage(30, 30, "🏠首页"), now, nextCode);
+  assert.match(home.decision.replies[0]?.text ?? "", /管理员设置菜单/);
+  assert.match(home.decision.replies[0]?.text ?? "", /Bot已存文件数：1/);
+  assert.match(home.decision.replies[0]?.text ?? "", /截止到 2026-10-11/);
+  assert.match(home.decision.replies[0]?.text ?? "", /累计用户数：2/);
+  assert.match(home.decision.replies[0]?.text ?? "", /昨日新增用户数：1/);
+  assert.match(home.decision.replies[0]?.text ?? "", /昨日访问用户数：1/);
+  assert.match(home.decision.replies[0]?.text ?? "", /累计下发文件次数：10/);
+  assert.match(home.decision.replies[0]?.text ?? "", /昨日下发文件次数：4/);
+  assert.match(home.decision.replies[0]?.text ?? "", /账户余额：\$ 0\.00/);
+  assert.doesNotMatch(home.decision.replies[0]?.text ?? "", /管理员设置菜单（创建者能看到）[\s\S]*使用底部/);
+  const guest = step(data, textMessage(31, 31, "🏠首页", 8), now, nextCode);
+  assert.match(guest.decision.replies[0]?.text ?? "", /把口令发过来/);
+  assert.doesNotMatch(guest.decision.replies[0]?.text ?? "", /管理员设置菜单/);
+  const asked = step(data, press(32, "ad"), now, nextCode);
+  assert.match(asked.decision.replies[0]?.text ?? "", /广告文案/);
+  const savedCopy = step(asked.data, textMessage(33, 33, "今日推荐\n第二行"), now, nextCode);
+  assert.equal(savedCopy.data.guestHome, "今日推荐\n第二行");
+  const shown = step(savedCopy.data, textMessage(34, 34, "/start", 8), now, nextCode);
+  assert.match(shown.decision.replies[0]?.text ?? "", /今日推荐/);
+  assert.match(shown.decision.replies[0]?.text ?? "", /第二行/);
+  assert.doesNotMatch(shown.decision.replies[0]?.text ?? "", /管理员设置菜单/);
+  const stranger = step(savedCopy.data, press(35, "ad", 8), now, nextCode);
+  assert.match(stranger.decision.callbackText ?? "", /只有创建者/);
+});
+
 test("keeps each person's packs private when sharing is off", () => {
   const nextCode = codes();
   const saved = finishPack(
@@ -598,7 +635,8 @@ test("menu offers home, store, get, and folder management", () => {
   const now = "2026-10-09T00:00:00.000Z";
   const started = step(baseData(), textMessage(1, 1, "🏠首页"), now, nextCode);
   assert.equal(started.decision.replies[0]?.menu, true);
-  assert.match(started.decision.replies[0]?.text ?? "", /管理文件夹/);
+  assert.match(started.decision.replies[0]?.text ?? "", /管理员设置菜单/);
+  assert.equal(started.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "ad");
 
   const stored = step(baseData(), textMessage(2, 2, "📩存储"), now, nextCode);
   assert.match(stored.decision.replies[0]?.text ?? "", /选择存储方式/);

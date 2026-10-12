@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { explainBot, type BotClient } from "./bot-client";
-import { deliveryBatches, retrievalPlan } from "./format";
+import { deliveryBatches, noteDelivery, retrievalPlan } from "./format";
 import { reduceVault, type Decision, type Reply } from "./reduce";
 import type { VaultRepository } from "./store";
 import { CODE_ALPHABET, VAULT_LIMITS, type InlineButton, type TgUpdate, type VaultFile, type VaultPack } from "./types";
@@ -150,7 +150,7 @@ export async function applyVaultUpdate(
       return reduced.data;
     });
     noteGroup(update, decision);
-    await perform(decision, repo, io);
+    await perform(decision, repo, io, now);
   } catch (error) {
     const chatId = decision.replies[0]?.chatId ?? decision.deliver?.chatId ?? groupChatId(update);
     const reason = explainBot(error) || "请再试一次";
@@ -231,7 +231,7 @@ function stripCopyButtons(reply: Reply): Reply | undefined {
   return { ...reply, keyboard };
 }
 
-async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
+async function perform(decision: Decision, repo: VaultRepository, io: VaultIO, now: string) {
   if (decision.copy) {
     try {
       const messageId = await io.copyMessage(decision.copy.fromChat, decision.copy.messageId, decision.copy.toChat);
@@ -258,6 +258,8 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO) {
       const pack = fresh.packs.find((entry) => entry.code === decision.deliver?.code && entry.status === "ready");
       if (!pack) throw new Error("没有这个口令");
       await io.deliver(decision.deliver.chatId, pack, fresh.botId);
+      const count = pack.files.length;
+      await repo.update((current) => noteDelivery(current, count, now));
     } catch (error) {
       const message = `取回失败：${explainBot(error) || "请再试一次"}`;
       decision.callbackText = message;

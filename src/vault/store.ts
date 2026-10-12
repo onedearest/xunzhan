@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isVaultCode } from "./format";
-import { emptyVault, type ExpiringNotice, type UserPrompt, type VaultData } from "./types";
+import { emptyVault, type DeliveryDay, type ExpiringNotice, type SeenUser, type UserPrompt, type VaultData } from "./types";
 
 export type VaultRepository = {
   load(): Promise<VaultData>;
@@ -34,6 +34,11 @@ export function createVaultRepository(dir: string): VaultRepository {
         shareLinks: parsed.shareLinks !== false,
         ownerId: readUserId(parsed.ownerId),
         adminIds: readAdminIds(parsed.adminIds),
+        guestHome: readGuestHome(parsed.guestHome),
+        openedAt: typeof parsed.openedAt === "string" ? parsed.openedAt : undefined,
+        seenUsers: readSeenUsers(parsed.seenUsers),
+        deliveries: typeof parsed.deliveries === "number" && parsed.deliveries > 0 ? Math.floor(parsed.deliveries) : 0,
+        deliveryDays: readDeliveryDays(parsed.deliveryDays),
         offset: typeof parsed.offset === "number" ? parsed.offset : 0,
         packs: Array.isArray(parsed.packs) ? parsed.packs : [],
         seenChannels: Array.isArray(parsed.seenChannels) ? parsed.seenChannels : [],
@@ -82,6 +87,34 @@ function readAdminIds(value: unknown) {
   return [...new Set(value.filter((item) => typeof item === "string" && /^\d{1,16}$/.test(item)))];
 }
 
+function readGuestHome(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim().slice(0, 500);
+  return text || undefined;
+}
+
+function readSeenUsers(value: unknown): SeenUser[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const user = item as { id?: unknown; firstSeen?: unknown; lastSeen?: unknown; prevSeen?: unknown };
+    if (typeof user.id !== "string" || !/^\d{1,16}$/.test(user.id)) return [];
+    if (typeof user.firstSeen !== "string" || typeof user.lastSeen !== "string") return [];
+    return [{ id: user.id, firstSeen: user.firstSeen, lastSeen: user.lastSeen, prevSeen: typeof user.prevSeen === "string" ? user.prevSeen : undefined }];
+  });
+}
+
+function readDeliveryDays(value: unknown): DeliveryDay[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const day = item as { day?: unknown; count?: unknown };
+    if (typeof day.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day.day)) return [];
+    if (typeof day.count !== "number" || day.count < 0) return [];
+    return [{ day: day.day, count: Math.floor(day.count) }];
+  });
+}
+
 function readExpiring(value: unknown): ExpiringNotice[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -104,6 +137,9 @@ function readPrompts(value: unknown): UserPrompt[] {
     }
     if (prompt.kind === "rename" && typeof prompt.ownerId === "string" && typeof prompt.code === "string" && isVaultCode(prompt.code)) {
       return [{ ownerId: prompt.ownerId, kind: "rename" as const, code: prompt.code }];
+    }
+    if (prompt.kind === "guest-home" && typeof prompt.ownerId === "string") {
+      return [{ ownerId: prompt.ownerId, kind: "guest-home" as const }];
     }
     return [];
   });
