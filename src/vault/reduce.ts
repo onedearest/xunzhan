@@ -13,6 +13,7 @@ import {
   packDetailText,
   personName,
   receiveText,
+  canStore,
   copyCodeButton,
   savedText,
   storeChoiceText,
@@ -41,8 +42,9 @@ export type Reply = {
   text: string;
   keyboard?: InlineButton[][];
   menu?: boolean;
+  guest?: boolean;
   bar?: "finish";
-  armBar?: "finish" | "menu";
+  armBar?: "finish" | "menu" | "guest";
   replaceMessageId?: number;
   quiet?: boolean;
   trackOwnerId?: string;
@@ -86,7 +88,11 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
   if (update.channel_post?.chat?.type === "channel") {
     return { data: remember(data, update.channel_post.chat, options.now), decision };
   }
-  if (update.callback_query) return reduceCallback(data, update.callback_query, decision, options);
+  if (update.callback_query) {
+    const result = reduceCallback(data, update.callback_query, decision, options);
+    paintGuestMenu(result.data, update.callback_query.from.id, result.decision);
+    return result;
+  }
   const message = update.message;
   if (!message) return { data, decision };
   if (message.from?.is_bot && !anonymousGroupAdmin(message)) return { data, decision };
@@ -103,10 +109,23 @@ export function reduceVault(data: VaultData, update: TgUpdate, options: Options)
   }
   if (!message.from) return { data: next, decision };
   const command = commandOf(message.text);
-  if (command) return reduceCommand(clearPrompt(next, message.from.id), message, command, decision);
+  if (command) return finishPrivate(reduceCommand(clearPrompt(next, message.from.id), message, command, decision), message.from.id);
   const action = message.text ? menuAction(message.text) : null;
-  if (action) return reduceCommand(clearPrompt(next, message.from.id), message, { name: action, arg: "" }, decision);
-  return reduceIncoming(next, message, decision, options);
+  if (action) return finishPrivate(reduceCommand(clearPrompt(next, message.from.id), message, { name: action, arg: "" }, decision), message.from.id);
+  return finishPrivate(reduceIncoming(next, message, decision, options), message.from.id);
+}
+
+function finishPrivate(result: { data: VaultData; decision: Decision }, userId: number) {
+  paintGuestMenu(result.data, userId, result.decision);
+  return result;
+}
+
+function paintGuestMenu(data: VaultData, userId: number, decision: Decision) {
+  if (canStore(data, userId)) return;
+  for (const reply of decision.replies) {
+    if (reply.menu) reply.guest = true;
+    if (reply.armBar === "menu") reply.armBar = "guest";
+  }
 }
 
 function reduceGroup(data: VaultData, message: TgMessage, decision: Decision) {
@@ -204,6 +223,9 @@ function reduceCallback(
     decision.callbackText = "这个按钮已经失效了";
     return { data, decision };
   }
+  if ((action.type === "continue" || action.type === "finish" || action.type === "new-folder" || action.type === "add-recent") && !canStore(data, query.from.id)) {
+    return denyStore(data, decision, chatId, query.from.id);
+  }
   if (action.type === "continue") {
     const open = openPack(data, query.from.id);
     decision.callbackText = open ? "继续发文件" : "先发文件";
@@ -267,6 +289,7 @@ function reduceCallback(
         username: data.botUsername,
         shareLinks: data.shareLinks,
         channelBound: Boolean(data.channelId),
+        canStore: canStore(data, query.from.id),
       }),
     });
     return { data, decision };
@@ -296,6 +319,7 @@ function reduceCallback(
     return showFolder(data, decision, chatId, pack, messageId);
   }
   if (action.type === "add") {
+    if (!canStore(data, query.from.id)) return denyStore(data, decision, chatId, query.from.id);
     if (pack.ownerId !== String(query.from.id)) {
       decision.callbackText = "只能往自己的文件夹里加文件";
       return { data, decision };
@@ -438,6 +462,7 @@ function reduceCommand(
           shareLinks: data.shareLinks,
           channelBound: Boolean(data.channelId),
           readsAllGroupMessages: data.readsAllGroupMessages,
+          canStore: canStore(data, user.id),
         }),
         decision,
       ),
@@ -445,6 +470,7 @@ function reduceCommand(
     return { data, decision };
   }
   if (command.name === "store") {
+    if (!canStore(data, user.id)) return denyStore(data, decision, chatId, user.id);
     decision.replies.push({
       kind: "send",
       chatId,
@@ -458,6 +484,7 @@ function reduceCommand(
     return { data, decision };
   }
   if (command.name === "finish") {
+    if (!canStore(data, user.id)) return denyStore(data, decision, chatId, user.id);
     const open = openPack(data, user.id);
     if (open?.code) return finishAppend(data, decision, user.id);
     return askName(data, decision, chatId, user.id);
@@ -552,6 +579,7 @@ function reduceIncoming(
     decision.replies.push({ kind: "send", chatId, menu: true, text: "新名称是一段文字。把名称发过来。" });
     return { data, decision };
   }
+  if (!canStore(data, user.id)) return denyStore(data, decision, chatId, user.id);
   if (open?.status === "naming" && draft?.kind === "text" && draft.text) {
     return finishPack(clearPrompt(data, user.id), decision, user.id, draft.text, options);
   }
@@ -998,6 +1026,32 @@ function readyPacks(data: VaultData, userId?: number) {
 
 function visiblePacks(data: VaultData, userId: number) {
   return data.shareLinks ? readyPacks(data) : readyPacks(data, userId);
+}
+
+function denyStore(data: VaultData, decision: Decision, chatId: string, userId: number) {
+  decision.callbackText = "只有管理员可以存储";
+  decision.replies.push({
+    kind: "send",
+    chatId,
+    menu: true,
+    text: "只有管理员可以存储。需要取回时，把口令发给我。",
+  });
+  return { data: releaseOpen(data, userId), decision };
+}
+
+function releaseOpen(data: VaultData, userId: number): VaultData {
+  const open = openPack(data, userId);
+  if (!open) return data;
+  if (open.code) {
+    return upsertPack(data, {
+      ...open,
+      status: "ready",
+      files: open.files.slice(0, open.appendFrom ?? open.files.length),
+      appendFrom: undefined,
+      noticeMessageId: undefined,
+    });
+  }
+  return dropOpen(data, userId);
 }
 
 function dropOpen(data: VaultData, userId: number): VaultData {

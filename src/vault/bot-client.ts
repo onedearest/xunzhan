@@ -68,6 +68,10 @@ export const botCommands = [
   { command: "folder", description: "📚管理文件夹" },
 ];
 
+function guestCommands() {
+  return botCommands.filter((item) => item.command !== "put");
+}
+
 export function canPostInChannel(member: Member) {
   if (member.status === "creator") return true;
   return member.status === "administrator" && member.can_post_messages !== false;
@@ -115,7 +119,14 @@ export class BotClient {
   }
 
   setCommands() {
-    return this.call<boolean>("setMyCommands", { commands: botCommands });
+    return this.call<boolean>("setMyCommands", { commands: guestCommands() });
+  }
+
+  setChatCommands(chatId: string, admin: boolean) {
+    return this.call<boolean>("setMyCommands", {
+      commands: admin ? botCommands : guestCommands(),
+      scope: { type: "chat", chat_id: chatId },
+    });
   }
 
   getUpdates(offset: number, signal: AbortSignal) {
@@ -153,7 +164,7 @@ export class BotClient {
     keyboard?: InlineButton[][],
     menu?: boolean,
     bar?: "finish",
-    replyTo?: { messageId?: number; threadId?: number; quiet?: boolean },
+    replyTo?: { messageId?: number; threadId?: number; quiet?: boolean; guest?: boolean },
   ) {
     const result = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
@@ -168,13 +179,13 @@ export class BotClient {
         : bar === "finish"
           ? { keyboard: collectingBar(), resize_keyboard: true, is_persistent: true }
           : menu
-            ? { keyboard: menuKeyboard(), resize_keyboard: true, is_persistent: true }
+            ? { keyboard: menuKeyboard(!replyTo?.guest), resize_keyboard: true, is_persistent: true }
             : undefined,
     });
     return result.message_id;
   }
 
-  async flashReplyBar(chatId: string, bar: "finish" | "menu") {
+  async flashReplyBar(chatId: string, bar: "finish" | "menu" | "guest") {
     const sent = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text: "·",
@@ -182,7 +193,7 @@ export class BotClient {
       reply_markup:
         bar === "finish"
           ? { keyboard: collectingBar(), resize_keyboard: true, is_persistent: true }
-          : { keyboard: menuKeyboard(), resize_keyboard: true, is_persistent: true },
+          : { keyboard: menuKeyboard(bar !== "guest"), resize_keyboard: true, is_persistent: true },
     });
     await this.deleteMessage(chatId, sent.message_id).catch(() => undefined);
   }

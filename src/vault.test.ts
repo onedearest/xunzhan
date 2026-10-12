@@ -223,7 +223,7 @@ test("keeps one collecting notice when more files arrive", async () => {
         return undefined;
       },
       async flashBar(chatId, bar) {
-        const carrier = await io.sendMessage(chatId, "·", undefined, false, bar);
+        const carrier = await io.sendMessage(chatId, "·", undefined, bar !== "finish", bar === "finish" ? bar : undefined);
         if (typeof carrier === "number") await io.deleteMessage(chatId, carrier);
       },
     };
@@ -490,6 +490,37 @@ test("does not store the same message twice", () => {
   const second = step(first.data, privateFile(2, 10), "2026-10-09T00:01:00.000Z", nextCode);
   assert.equal(second.data.packs[0]?.files.length, 1);
   assert.match(second.decision.replies[0]?.text ?? "", /已经收过了/);
+});
+
+test("only an admin can store once a folder exists", () => {
+  const nextCode = codes();
+  const now = "2026-10-09T00:00:00.000Z";
+  const saved = finishPack(step(baseData(), privateFile(1, 10), now, nextCode).data, "周报素材包", now, nextCode);
+  const incoming = {
+    message_id: 30,
+    chat: { id: 8, type: "private" },
+    from: { id: 8, first_name: "周衡" },
+    document: { file_id: "file-30", file_name: "外来.pdf", file_size: 20, mime_type: "application/pdf" },
+  };
+  const stranger = step(saved.data, update({ update_id: 30, message: incoming }), now, nextCode);
+  assert.match(stranger.decision.replies[0]?.text ?? "", /只有管理员/);
+  assert.equal(stranger.decision.replies[0]?.guest, true);
+  assert.equal(stranger.data.packs.length, 1);
+  assert.equal(stranger.data.packs[0]?.status, "ready");
+  const menu = step(saved.data, textMessage(31, 31, "📩存储", 8), now, nextCode);
+  assert.match(menu.decision.replies[0]?.text ?? "", /只有管理员/);
+  const hello = step(saved.data, textMessage(32, 32, "/start", 8), now, nextCode);
+  assert.equal(hello.decision.replies[0]?.guest, true);
+  assert.match(hello.decision.replies[0]?.text ?? "", /把口令发过来/);
+  assert.doesNotMatch(hello.decision.replies[0]?.text ?? "", /取消并退出/);
+  const owner = step(saved.data, privateFile(33, 33, "再存.pdf"), now, nextCode);
+  assert.equal(owner.data.packs.some((pack) => pack.status === "collecting" && pack.ownerId === "7"), true);
+  const locked = { ...saved.data, adminIds: ["8"] };
+  const blockedOwner = step(locked, privateFile(34, 34), now, nextCode);
+  assert.match(blockedOwner.decision.replies[0]?.text ?? "", /只有管理员/);
+  assert.equal(blockedOwner.data.packs.filter((pack) => pack.status === "ready").length, 1);
+  const allowed = step(locked, update({ update_id: 35, message: { ...incoming, message_id: 35 } }), now, nextCode);
+  assert.equal(allowed.data.packs.some((pack) => pack.ownerId === "8" && pack.status === "collecting"), true);
 });
 
 test("keeps each person's packs private when sharing is off", () => {

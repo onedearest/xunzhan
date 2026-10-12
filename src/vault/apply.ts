@@ -13,13 +13,13 @@ export type VaultIO = {
     keyboard?: InlineButton[][],
     menu?: boolean,
     bar?: "finish",
-    replyTo?: { messageId?: number; threadId?: number; quiet?: boolean },
+    replyTo?: { messageId?: number; threadId?: number; quiet?: boolean; guest?: boolean },
   ): Promise<number | void>;
   editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]): Promise<void>;
   answerCallback(id: string, text?: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
   deliver(chatId: string, pack: VaultPack, currentBotId?: string): Promise<void>;
-  flashBar?(chatId: string, bar: "finish" | "menu"): Promise<void>;
+  flashBar?(chatId: string, bar: "finish" | "menu" | "guest"): Promise<void>;
 };
 
 export function randomCode() {
@@ -174,6 +174,7 @@ function sendReply(io: VaultIO, reply: Reply) {
     messageId: reply.replyToMessageId,
     threadId: reply.messageThreadId,
     quiet: reply.quiet,
+    guest: reply.guest,
   });
 }
 

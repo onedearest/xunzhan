@@ -13,6 +13,7 @@ export function homePage() {
     section, form, ol { border: 1px solid #2a2c33; border-radius: 10px; padding: 16px; margin: 16px 0; }
     label { display: block; margin: 12px 0 6px; }
     input[type="text"] { width: 100%; box-sizing: border-box; height: 40px; border-radius: 8px; border: 1px solid #3a3d46; background: #181a20; color: inherit; padding: 0 10px; }
+    input.id { width: 180px; height: 38px; }
     button { height: 38px; border-radius: 8px; border: 0; padding: 0 14px; background: #f4f4f5; color: #111; cursor: pointer; }
     button.ghost { background: transparent; color: #f4f4f5; border: 1px solid #3a3d46; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -27,7 +28,7 @@ export function homePage() {
   <ol>
     <li>在 @BotFather 发送 /newbot，复制整段令牌。</li>
     <li>贴到下面，点开始接收。这台机器要一直开着。</li>
-    <li>打开机器人。底部是获取、首页、存储、管理文件夹。</li>
+    <li>打开机器人。底部是获取、首页、存储、管理文件夹。只有管理员能存储，别人用口令取回。</li>
   </ol>
   <section id="status">正在读取…</section>
   <form id="form">
@@ -106,7 +107,42 @@ function draw(data) {
         errorEl.textContent = error.message;
       }
     }));
-    botsEl.append(line, row);
+    const admins = document.createElement("div");
+    for (const adminId of bot.adminIds || []) {
+      const adminRow = document.createElement("div");
+      adminRow.className = "row";
+      const who = document.createElement("p");
+      who.textContent = "管理员 " + adminId;
+      adminRow.append(who);
+      if ((bot.adminIds || []).length > 1) {
+        adminRow.append(button("取消", "ghost", async () => {
+          errorEl.textContent = "";
+          try {
+            draw(await api("/api/vault/admins", { method: "POST", body: JSON.stringify({ botId: bot.botId, adminId, allow: false }) }));
+          } catch (error) {
+            errorEl.textContent = error.message;
+          }
+        }));
+      }
+      admins.append(adminRow);
+    }
+    const add = document.createElement("div");
+    add.className = "row";
+    const adminInput = document.createElement("input");
+    adminInput.type = "text";
+    adminInput.className = "id";
+    adminInput.placeholder = "Telegram 用户编号";
+    adminInput.autocomplete = "off";
+    add.append(adminInput, button("添加管理员", "", async () => {
+      errorEl.textContent = "";
+      try {
+        draw(await api("/api/vault/admins", { method: "POST", body: JSON.stringify({ botId: bot.botId, adminId: adminInput.value.trim(), allow: true }) }));
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    }));
+    admins.append(add);
+    botsEl.append(line, row, admins);
   }
   if ((data.pages || 1) > 1) {
     const nav = document.createElement("div");

@@ -32,6 +32,7 @@ export function createVaultRepository(dir: string): VaultRepository {
         channelId: parsed.channelId,
         channelTitle: parsed.channelTitle,
         shareLinks: parsed.shareLinks !== false,
+        adminIds: readAdminIds(parsed.adminIds),
         offset: typeof parsed.offset === "number" ? parsed.offset : 0,
         packs: Array.isArray(parsed.packs) ? parsed.packs : [],
         seenChannels: Array.isArray(parsed.seenChannels) ? parsed.seenChannels : [],
@@ -69,6 +70,11 @@ export function createVaultRepository(dir: string): VaultRepository {
       });
     },
   };
+}
+
+function readAdminIds(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return [...new Set(value.filter((item) => typeof item === "string" && /^\d{1,16}$/.test(item)))];
 }
 
 function readExpiring(value: unknown): ExpiringNotice[] {

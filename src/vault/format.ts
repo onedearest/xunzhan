@@ -150,11 +150,22 @@ export const MENU = {
   folders: "📚管理文件夹",
 } as const;
 
-export function menuKeyboard() {
-  return [
-    [{ text: MENU.get }, { text: MENU.home }],
-    [{ text: MENU.store }, { text: MENU.folders }],
-  ];
+export function menuKeyboard(admin = true) {
+  const top = [{ text: MENU.get }, { text: MENU.home }];
+  if (!admin) return [top, [{ text: MENU.folders }]];
+  return [top, [{ text: MENU.store }, { text: MENU.folders }]];
+}
+
+export function storeAdmins(data: { adminIds?: string[]; packs: { ownerId: string }[] }) {
+  const listed = (data.adminIds ?? []).filter((id) => /^\d{1,16}$/.test(id));
+  if (listed.length) return [...new Set(listed)];
+  return [...new Set(data.packs.map((pack) => pack.ownerId).filter((id) => /^\d{1,16}$/.test(id)))];
+}
+
+export function canStore(data: { adminIds?: string[]; packs: { ownerId: string }[] }, userId: number | string) {
+  const admins = storeAdmins(data);
+  if (!admins.length) return true;
+  return admins.includes(String(userId));
 }
 
 export const COLLECT = {
@@ -263,7 +274,12 @@ export function searchAskText() {
   return "把关键词发过来。我在已经打包的文件夹里按名称找。";
 }
 
-export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean; readsAllGroupMessages?: boolean }) {
+export function welcomeText(options: { username?: string; shareLinks: boolean; channelBound: boolean; readsAllGroupMessages?: boolean; canStore?: boolean }) {
+  if (options.canStore === false) {
+    const lines = ["把口令发过来就能取回文件。", "", "📩获取：按口令取回", "📚管理文件夹：看已经分享的文件夹", "", "/get 口令"];
+    if (options.shareLinks && options.username) lines.push("", `链接的样子：https://t.me/${options.username}?start=口令`);
+    return lines.join("\n");
+  }
   const lines = [
     "用底部的四个按钮就行。",
     "",

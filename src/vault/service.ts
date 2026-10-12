@@ -3,7 +3,7 @@ import { HttpError } from "../http";
 import { applyVaultUpdate, ioFromClient } from "./apply";
 import { BotApiError, BotClient, canPostInChannel, explainBot } from "./bot-client";
 import { botIdFromToken, fleetStore, isBotId, type Fleet } from "./fleet";
-import { maskToken, normalizeChannel, queryItems } from "./format";
+import { canStore, maskToken, normalizeChannel, queryItems, storeAdmins } from "./format";
 import {
   VAULT_LIMITS,
   type BotPublic,
@@ -210,6 +210,25 @@ export async function forgetVault(input: { botId?: unknown } = {}, fleet: Fleet 
   return fleetView(fleet, "", 1);
 }
 
+export async function setVaultAdmins(
+  input: { botId?: unknown; adminId?: unknown; allow?: unknown },
+  fleet: Fleet = fleetStore(),
+) {
+  await fleet.prepare();
+  const botId = await chosenBot(input.botId, fleet);
+  const adminId = typeof input.adminId === "string" ? input.adminId.trim() : "";
+  if (!/^\d{1,16}$/.test(adminId)) throw new HttpError(400, "管理员编号是一串数字");
+  const allow = input.allow !== false;
+  const saved = await fleet.repo(botId).update((data) => {
+    const current = storeAdmins(data);
+    const next = allow ? [...new Set([...current, adminId])] : current.filter((id) => id !== adminId);
+    if (!next.length) throw new HttpError(400, "至少留一个管理员");
+    return { ...data, adminIds: next };
+  });
+  await fleet.note(botId, saved);
+  return fleetView(fleet, "", 1);
+}
+
 export async function deleteVaultItem(code: string, botId?: string, fleet: Fleet = fleetStore()) {
   await fleet.prepare();
   const id = botId && isBotId(botId) ? botId : await onlyActive(fleet);
@@ -314,6 +333,7 @@ async function poll(
       for (const update of updates) {
         if (runtime().bots.get(botId)?.generation !== generation) return;
         await applyVaultUpdate(update, repo, ioFromClient(client));
+        await syncUserCommands(client, repo, update).catch(() => undefined);
       }
       if (updates.length || data.lastError) await fleet.note(botId, await repo.load());
     } catch (error) {
@@ -400,6 +420,7 @@ function toBot(botId: string, data: VaultData): BotPublic {
     enabled: data.enabled,
     packCount: data.packs.filter((pack) => pack.status === "ready" && pack.code).length,
     shareLinks: data.shareLinks,
+    adminIds: storeAdmins(data),
     lastError: data.lastError,
     channelTitle: data.channelTitle,
   };
@@ -430,6 +451,20 @@ async function sweepExpiring(repo: ReturnType<Fleet["repo"]>, client: BotClient)
     ...current,
     expiring: (current.expiring ?? []).filter((item) => !dueKeys.has(`${item.chatId}:${item.messageId}`)),
   }));
+}
+
+const commandScopes = new Set<string>();
+
+async function syncUserCommands(client: BotClient, repo: ReturnType<Fleet["repo"]>, update: { message?: { chat: { type: string }; from?: { id: number } }; callback_query?: { from: { id: number }; message?: { chat: { type: string } } } }) {
+  const from = update.message?.from ?? update.callback_query?.from;
+  const chat = update.message?.chat ?? update.callback_query?.message?.chat;
+  if (!from || !chat || chat.type !== "private") return;
+  const data = await repo.load();
+  const admin = canStore(data, from.id);
+  const key = `${data.botId ?? ""}:${from.id}:${admin}`;
+  if (commandScopes.has(key)) return;
+  await client.setChatCommands(String(from.id), admin);
+  commandScopes.add(key);
 }
 
 function sleep(ms: number, signal: AbortSignal) {
