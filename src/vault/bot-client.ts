@@ -48,6 +48,7 @@ export function explainBot(error: unknown) {
 type Member = {
   status?: string;
   can_post_messages?: boolean;
+  is_member?: boolean;
 };
 
 const fileMethod: Record<Exclude<VaultKind, "text">, { method: string; field: string; caption: boolean }> = {
@@ -78,6 +79,8 @@ export function canPostInChannel(member: Member) {
 }
 
 export class BotClient {
+  protectContent = false;
+
   constructor(
     private readonly token: string,
     private readonly fetchImpl: typeof fetch = fetch,
@@ -154,6 +157,7 @@ export class BotClient {
       chat_id: toChat,
       from_chat_id: fromChat,
       message_id: messageId,
+      protect_content: this.protectContent || undefined,
     });
     return result.message_id;
   }
@@ -169,6 +173,7 @@ export class BotClient {
     const result = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text: text.slice(0, 4096),
+      protect_content: this.protectContent || undefined,
       disable_notification: replyTo?.quiet || undefined,
       message_thread_id: replyTo?.threadId,
       reply_parameters: replyTo?.messageId
@@ -229,6 +234,7 @@ export class BotClient {
   ) {
     return this.call<Array<{ message_id: number }>>("sendMediaGroup", {
       chat_id: chatId,
+      protect_content: this.protectContent || undefined,
       media: media.map((item) => ({
         type: item.type,
         media: item.media,
@@ -245,6 +251,7 @@ export class BotClient {
     const body: Record<string, unknown> = {
       chat_id: chatId,
       [spec.field]: item.fileId,
+      protect_content: this.protectContent || undefined,
     };
     if (spec.caption && item.caption) body.caption = item.caption.slice(0, 1024);
     return this.call(spec.method, body);

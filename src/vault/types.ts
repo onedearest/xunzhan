@@ -157,7 +157,12 @@ export type SeenChannel = {
 export type UserPrompt =
   | { ownerId: string; kind: "search" }
   | { ownerId: string; kind: "rename"; code: string }
-  | { ownerId: string; kind: "guest-home" };
+  | { ownerId: string; kind: "guest-home" }
+  | { ownerId: string; kind: "deliver-ad" }
+  | { ownerId: string; kind: "follow" }
+  | { ownerId: string; kind: "support" }
+  | { ownerId: string; kind: "broadcast" }
+  | { ownerId: string; kind: "admin-add" };
 
 export type SeenUser = {
   id: string;
@@ -190,6 +195,12 @@ export type VaultData = {
   ownerId?: string;
   adminIds?: string[];
   guestHome?: string;
+  deliverAd?: string;
+  followChannel?: string;
+  support?: string;
+  protectContent?: boolean;
+  channelPush?: boolean;
+  expireHours?: number;
   openedAt?: string;
   seenUsers: SeenUser[];
   deliveries: number;

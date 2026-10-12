@@ -636,7 +636,19 @@ test("menu offers home, store, get, and folder management", () => {
   const started = step(baseData(), textMessage(1, 1, "🏠首页"), now, nextCode);
   assert.equal(started.decision.replies[0]?.menu, true);
   assert.match(started.decision.replies[0]?.text ?? "", /管理员设置菜单/);
-  assert.equal(started.decision.replies[0]?.keyboard?.[0]?.[0]?.callback_data, "ad");
+  const ownerKeys = started.decision.replies[0]?.keyboard?.flat().map((button) => button.callback_data) ?? [];
+  assert.equal(ownerKeys[0], "k:put");
+  assert.equal(ownerKeys.includes("k:fee"), true);
+  assert.equal(ownerKeys.includes("k:all"), true);
+  const guestHome = step(baseData(), textMessage(11, 11, "🏠首页", 8), now, nextCode);
+  const guestKeys = guestHome.decision.replies[0]?.keyboard?.flat().map((button) => button.callback_data) ?? [];
+  assert.equal(guestKeys.includes("k:get"), true);
+  assert.equal(guestKeys.includes("k:fee"), false);
+  assert.equal(guestKeys.includes("k:all"), false);
+  const refused = step(baseData(), press(12, "k:fee", 8), now, nextCode);
+  assert.match(refused.decision.callbackText ?? "", /只有创建者/);
+  const priced = step(baseData(), press(13, "k:fee"), now, nextCode);
+  assert.match(priced.decision.replies[0]?.text ?? "", /还没有开通收款/);
 
   const stored = step(baseData(), textMessage(2, 2, "📩存储"), now, nextCode);
   assert.match(stored.decision.replies[0]?.text ?? "", /选择存储方式/);
@@ -769,6 +781,73 @@ test("remembers a channel without storing its posts as files", () => {
     codes(),
   );
   assert.equal(posted.data.packs.length, 0);
+});
+
+test("owner home keeps the extra controls off everyone else", () => {
+  const now = "2026-10-09T00:00:00.000Z";
+  const nextCode = codes();
+  const locked = step(baseData(), press(1, "k:fwd"), now, nextCode);
+  assert.equal(locked.data.protectContent, true);
+  assert.match(locked.decision.replies[0]?.text ?? "", /禁止/);
+  const timed = step(baseData(), press(2, "k:die"), now, nextCode);
+  assert.equal(timed.data.expireHours, 24);
+  const helper = step(baseData({ adminIds: ["8"] }), textMessage(3, 3, "🏠首页", 8), now, nextCode);
+  const keys = helper.decision.replies[0]?.keyboard?.flat().map((button) => button.callback_data) ?? [];
+  assert.equal(keys.includes("k:put"), true);
+  assert.equal(keys.includes("k:dir"), true);
+  assert.equal(keys.includes("k:fee"), false);
+  assert.equal(keys.includes("k:get"), false);
+});
+
+test("asks a guest to follow before delivering the folder", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "vault-"));
+  try {
+    const repo = createVaultRepository(dir);
+    await repo.update(() => baseData({ packs: [readyPack(0)], followChannel: "@news", protectContent: true }));
+    const sent: string[] = [];
+    let delivered = 0;
+    const protect: boolean[] = [];
+    const io: VaultIO = {
+      ...fakeIo(sent, async () => 1),
+      async deliver() {
+        delivered += 1;
+        return 9;
+      },
+      async getChatMember() {
+        return { status: "left" };
+      },
+      setProtect(on) {
+        protect.push(on);
+      },
+    };
+    await applyVaultUpdate(textMessage(20, 20, "/get abcdefgj", 8), repo, io, {
+      now: "2026-10-09T00:00:00.000Z",
+      nextCode: codes(),
+    });
+    assert.equal(delivered, 0);
+    assert.deepEqual(protect, []);
+    assert.match(sent.join("\n"), /请先关注 @news/);
+    const blocked = await repo.load();
+    assert.equal(blocked.deliveries, 0);
+    assert.equal(blocked.offset, 21);
+
+    const joined: VaultIO = {
+      ...io,
+      async getChatMember() {
+        return { status: "member" };
+      },
+    };
+    await applyVaultUpdate(textMessage(21, 21, "/get abcdefgj", 8), repo, joined, {
+      now: "2026-10-09T00:01:00.000Z",
+      nextCode: codes(),
+    });
+    assert.equal(delivered, 1);
+    assert.deepEqual(protect, [true, false]);
+    const saved = await repo.load();
+    assert.equal(saved.deliveries, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("stops a person at the pack limit", () => {

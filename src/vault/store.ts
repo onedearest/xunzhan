@@ -35,6 +35,12 @@ export function createVaultRepository(dir: string): VaultRepository {
         ownerId: readUserId(parsed.ownerId),
         adminIds: readAdminIds(parsed.adminIds),
         guestHome: readGuestHome(parsed.guestHome),
+        deliverAd: readGuestHome(parsed.deliverAd),
+        followChannel: readFollow(parsed.followChannel),
+        support: readGuestHome(parsed.support)?.slice(0, 80),
+        protectContent: parsed.protectContent === true,
+        channelPush: parsed.channelPush === true,
+        expireHours: parsed.expireHours === 24 || parsed.expireHours === 168 ? parsed.expireHours : undefined,
         openedAt: typeof parsed.openedAt === "string" ? parsed.openedAt : undefined,
         seenUsers: readSeenUsers(parsed.seenUsers),
         deliveries: typeof parsed.deliveries === "number" && parsed.deliveries > 0 ? Math.floor(parsed.deliveries) : 0,
@@ -85,6 +91,14 @@ function readUserId(value: unknown) {
 function readAdminIds(value: unknown) {
   if (!Array.isArray(value)) return undefined;
   return [...new Set(value.filter((item) => typeof item === "string" && /^\d{1,16}$/.test(item)))];
+}
+
+function readFollow(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (text.startsWith("@") && text.length > 1 && text.length <= 40) return text;
+  if (/^-\d{6,20}$/.test(text)) return text;
+  return undefined;
 }
 
 function readGuestHome(value: unknown) {
@@ -138,8 +152,16 @@ function readPrompts(value: unknown): UserPrompt[] {
     if (prompt.kind === "rename" && typeof prompt.ownerId === "string" && typeof prompt.code === "string" && isVaultCode(prompt.code)) {
       return [{ ownerId: prompt.ownerId, kind: "rename" as const, code: prompt.code }];
     }
-    if (prompt.kind === "guest-home" && typeof prompt.ownerId === "string") {
-      return [{ ownerId: prompt.ownerId, kind: "guest-home" as const }];
+    if (
+      (prompt.kind === "guest-home" ||
+        prompt.kind === "deliver-ad" ||
+        prompt.kind === "follow" ||
+        prompt.kind === "support" ||
+        prompt.kind === "broadcast" ||
+        prompt.kind === "admin-add") &&
+      typeof prompt.ownerId === "string"
+    ) {
+      return [{ ownerId: prompt.ownerId, kind: prompt.kind }];
     }
     return [];
   });

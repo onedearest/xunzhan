@@ -350,6 +350,32 @@ export function ownerHomeText(data: VaultData, now: string) {
   ].join("\n");
 }
 
+export function ownerHomeKeyboard(): InlineButton[][] {
+  return [
+    [{ text: "📥存储", callback_data: "k:put" }, { text: "📁管理文件夹", callback_data: "k:dir" }],
+    [{ text: "🔔强制关注", callback_data: "k:sub" }, { text: "💰设置价格", callback_data: "k:fee" }],
+    [{ text: "👥管理员设置", callback_data: "k:adm" }, { text: "💎会员管理", callback_data: "k:vip" }],
+    [{ text: "📝START文案设置", callback_data: "k:sta" }, { text: "🏳️自定义广告", callback_data: "k:ads" }],
+    [{ text: "⏰文件定时销毁", callback_data: "k:die" }, { text: "🚫是否允许下载和转发", callback_data: "k:fwd" }],
+    [{ text: "📣全员推送", callback_data: "k:all" }, { text: "📍自动频道推送", callback_data: "k:chn" }],
+    [{ text: "♻️资源备份", callback_data: "k:bak" }, { text: "🔧重启机器人", callback_data: "k:reb" }],
+    [{ text: "📋订单记录", callback_data: "k:ord" }, { text: "💵收益提现", callback_data: "k:pay" }],
+    [{ text: "💡功能和使用流程介绍", callback_data: "k:doc" }, { text: "💬联系客服", callback_data: "k:sup" }],
+  ];
+}
+
+export function userHomeKeyboard(canStoreFiles: boolean): InlineButton[][] {
+  return canStoreFiles
+    ? [
+        [{ text: "📥存储", callback_data: "k:put" }, { text: "📁管理文件夹", callback_data: "k:dir" }],
+        [{ text: "💡功能和使用流程介绍", callback_data: "k:doc" }, { text: "💬联系客服", callback_data: "k:sup" }],
+      ]
+    : [
+        [{ text: "📩获取", callback_data: "k:get" }, { text: "📁查看文件夹", callback_data: "k:dir" }],
+        [{ text: "💡功能和使用流程介绍", callback_data: "k:doc" }, { text: "💬联系客服", callback_data: "k:sup" }],
+      ];
+}
+
 export function guestHomeText(data: VaultData, userId: string) {
   const custom = data.guestHome?.trim();
   const lines = [

@@ -17,7 +17,10 @@ import {
   copyCodeButton,
   guestHomeText,
   noteVisit,
+  ownerHomeKeyboard,
   ownerHomeText,
+  storageUsers,
+  userHomeKeyboard,
   savedText,
   storeChoiceText,
   queryItems,
@@ -64,6 +67,7 @@ export type Decision = {
   deliver?: { chatId: string; code: string };
   removeChannelMessages?: { channelId: string; messageId: number }[];
   channelHint?: string;
+  channelPost?: { chatId: string; text: string };
 };
 
 type Options = {
@@ -310,6 +314,9 @@ function reduceCallback(
       }),
     });
     return { data, decision };
+  }
+  if (action.type === "panel") {
+    return openPanel(data, decision, chatId, query.from, action.key, options.now);
   }
   if (action.type === "edit-ad") {
     if (data.ownerId !== String(query.from.id)) {
@@ -590,6 +597,9 @@ function reduceIncoming(
   if (prompt?.kind === "guest-home") {
     return saveGuestHome(data, decision, chatId, user.id, draft?.kind === "text" ? draft.text : undefined);
   }
+  if (prompt?.kind === "deliver-ad" || prompt?.kind === "follow" || prompt?.kind === "support" || prompt?.kind === "broadcast" || prompt?.kind === "admin-add") {
+    return saveOwnerPrompt(data, decision, chatId, user.id, prompt.kind, draft?.kind === "text" ? draft.text : undefined);
+  }
   if (prompt?.kind === "search" && draft?.kind === "text" && draft.text) {
     return searchPacks(clearPrompt(data, user.id), decision, chatId, user.id, draft.text);
   }
@@ -733,6 +743,12 @@ function finishPack(data: VaultData, decision: Decision, userId: number, rawName
       [{ text: "< 返回首页", callback_data: "h" }],
     ],
   });
+  if (data.channelPush && data.channelId && data.botUsername) {
+    decision.channelPost = {
+      chatId: data.channelId,
+      text: `「${name}」\nhttps://t.me/${data.botUsername}?start=${code}`,
+    };
+  }
   return { data: clearPrompt(upsertPack(data, pack), userId), decision };
 }
 
@@ -771,6 +787,287 @@ function clearPrompt(data: VaultData, userId: number): VaultData {
   return { ...data, prompts };
 }
 
+const ownerPanels = new Set(["sub", "fee", "adm", "vip", "sta", "ads", "die", "fwd", "all", "chn", "bak", "reb", "ord", "pay"]);
+
+function openPanel(data: VaultData, decision: Decision, chatId: string, user: TgUser, key: string, now: string) {
+  const userId = user.id;
+  if (ownerPanels.has(key) && data.ownerId !== String(userId)) {
+    decision.callbackText = "只有创建者可以使用";
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "这个功能只有创建者能用。" });
+    return { data, decision };
+  }
+  if (key === "put") {
+    if (!canStore(data, userId)) return denyStore(data, decision, chatId, userId);
+    decision.callbackText = "选择存储方式";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      text: storeChoiceText(),
+      keyboard: [
+        [{ text: "📁新建文件夹", callback_data: "w:new" }],
+        [{ text: "📩继续添加到最近一次文件夹", callback_data: "w:add" }],
+        [{ text: "× 关闭", callback_data: "w:close" }],
+      ],
+    });
+    return { data, decision };
+  }
+  if (key === "dir") {
+    decision.callbackText = "文件夹";
+    return listPacks(data, decision, chatId, userId, 1);
+  }
+  if (key === "get") {
+    decision.callbackText = "把口令发过来";
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "把口令发过来，或使用 /get 口令。" });
+    return { data, decision };
+  }
+  if (key === "sta" || key === "doc") {
+    if (key === "doc") {
+      decision.callbackText = "使用说明";
+      decision.replies.push({
+        kind: "send",
+        chatId,
+        menu: true,
+        text: welcomeText({
+          username: data.botUsername,
+          shareLinks: data.shareLinks,
+          channelBound: Boolean(data.channelId),
+          readsAllGroupMessages: data.readsAllGroupMessages,
+          canStore: canStore(data, userId),
+          userId: String(userId),
+        }),
+      });
+      return { data, decision };
+    }
+    decision.callbackText = "把文案发过来";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: "把普通用户首页要显示的广告文案发过来。可以换行。发送「清空」就恢复默认。",
+    });
+    return { data: askGuestHome(data, userId), decision };
+  }
+  if (key === "ads") {
+    decision.callbackText = "把广告发过来";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: data.deliverAd
+        ? `现在取回文件时会附上：\n${data.deliverAd}\n\n把新广告发过来。发送「清空」就去掉。`
+        : "把取回文件时要附上的广告发过来。发送「清空」就去掉。",
+    });
+    return { data: askOwnerPrompt(data, userId, "deliver-ad"), decision };
+  }
+  if (key === "sub") {
+    decision.callbackText = "设置强制关注";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: data.followChannel
+        ? `现在要求先关注 ${data.followChannel}。\n把新的 @频道 或 -100 编号发过来。发送「关闭」就取消。`
+        : "把用户必须先关注的 @频道 或 -100 编号发过来。发送「关闭」就取消。机器人要在那个频道里。",
+    });
+    return { data: askOwnerPrompt(data, userId, "follow"), decision };
+  }
+  if (key === "adm") {
+    const extras = storageUsers(data);
+    decision.callbackText = "管理员";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: [
+        `创建者：${data.ownerId || "还没设置"}`,
+        extras.length ? `可存储的用户：${extras.join("、")}` : "还没有另外添加可存储的用户。",
+        "",
+        "把用户编号发过来，他就能够存储。发送「移除 编号」就取消。",
+      ].join("\n"),
+    });
+    return { data: askOwnerPrompt(data, userId, "admin-add"), decision };
+  }
+  if (key === "sup") {
+    if (data.ownerId === String(userId)) {
+      decision.callbackText = "设置客服";
+      decision.replies.push({
+        kind: "send",
+        chatId,
+        menu: true,
+        text: data.support
+          ? `现在的客服说明是：\n${data.support}\n\n把新的说明发过来。发送「清空」就去掉。`
+          : "把客服说明发过来，例如 @用户名。普通用户点「联系客服」会看到。发送「清空」就去掉。",
+      });
+      return { data: askOwnerPrompt(data, userId, "support"), decision };
+    }
+    decision.callbackText = "客服";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: data.support || "创建者还没有留下客服说明。",
+    });
+    return { data, decision };
+  }
+  if (key === "all") {
+    decision.callbackText = "写推送内容";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: `下一条文字会私聊发给使用过这个机器人的人，最多 100 人。当前记录了 ${(data.seenUsers ?? []).length} 人。发送「取消」就放弃。`,
+    });
+    return { data: askOwnerPrompt(data, userId, "broadcast"), decision };
+  }
+  if (key === "fwd") {
+    const protectContent = !data.protectContent;
+    decision.callbackText = protectContent ? "已禁止转发" : "已允许转发";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: protectContent ? "取回的文件已禁止保存、下载入口和转发。" : "取回的文件允许保存和转发。",
+    });
+    return { data: { ...data, protectContent }, decision };
+  }
+  if (key === "chn") {
+    if (!data.channelId) {
+      decision.callbackText = "还没有仓库频道";
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "先在管理页绑定仓库频道，才能把新文件夹的链接推过去。" });
+      return { data, decision };
+    }
+    const channelPush = !data.channelPush;
+    decision.callbackText = channelPush ? "已打开频道推送" : "已关闭频道推送";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: channelPush ? "之后新建的文件夹会把链接发到仓库频道。" : "已经关闭。新文件夹不再发到频道。",
+    });
+    return { data: { ...data, channelPush }, decision };
+  }
+  if (key === "die") {
+    const expireHours = data.expireHours === 24 ? 168 : data.expireHours === 168 ? undefined : 24;
+    decision.callbackText = expireHours ? `${expireHours} 小时后删除` : "已关闭定时销毁";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: expireHours
+        ? `取回时发出的说明会在 ${expireHours} 小时后删除。文件夹本身还在，要点管理文件夹里的删除才会去掉。`
+        : "已关闭。取回时的说明不再自动删除。",
+    });
+    return { data: { ...data, expireHours }, decision };
+  }
+  if (key === "bak") {
+    const lines = readyPacks(data).slice(0, 40).map((pack) => `${pack.name || "未命名"} · ${pack.files.length} 个 · ${pack.code}`);
+    decision.callbackText = "备份清单";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: lines.length ? `文件夹清单：\n${lines.join("\n")}` : "还没有打包好的文件夹。",
+    });
+    return { data, decision };
+  }
+  if (key === "reb") {
+    decision.callbackText = "重启说明";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: "在云电脑上先停掉正在跑的窗口，然后执行：\ncd ~/storage-bot\nnpm start\n不要同时开两份，否则会抢消息。",
+    });
+    return { data, decision };
+  }
+  if (key === "fee" || key === "vip" || key === "ord" || key === "pay") {
+    decision.callbackText = "没有开通收款";
+    decision.replies.push({
+      kind: "send",
+      chatId,
+      menu: true,
+      text: ownerHomeText(data, now).split("\n").slice(-4).join("\n") + "\n\n还没有开通收款，所以价格、会员、订单和提现都是 0。",
+    });
+    return { data, decision };
+  }
+  decision.callbackText = "没有这个功能";
+  return { data, decision };
+}
+
+function askOwnerPrompt(data: VaultData, userId: number, kind: "deliver-ad" | "follow" | "support" | "broadcast" | "admin-add"): VaultData {
+  const prompts = (data.prompts ?? []).filter((item) => item.ownerId !== String(userId));
+  return { ...data, prompts: [...prompts, { ownerId: String(userId), kind }] };
+}
+
+function saveOwnerPrompt(
+  data: VaultData,
+  decision: Decision,
+  chatId: string,
+  userId: number,
+  kind: "deliver-ad" | "follow" | "support" | "broadcast" | "admin-add",
+  raw?: string,
+) {
+  if (data.ownerId !== String(userId)) {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "只有创建者可以设置。" });
+    return { data: clearPrompt(data, userId), decision };
+  }
+  const text = raw?.trim() ?? "";
+  if (!text) {
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "请发送一段文字。" });
+    return { data, decision };
+  }
+  if (kind === "broadcast") {
+    if (text === "取消" || menuAction(text) || text.startsWith("/")) {
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "已取消推送。" });
+      return { data: clearPrompt(data, userId), decision };
+    }
+    const ids = [...new Set((data.seenUsers ?? []).map((user) => user.id))].filter((id) => id !== String(userId)).slice(0, 100);
+    decision.replies.push({ kind: "send", chatId, menu: true, text: ids.length ? `正在发给 ${ids.length} 人。` : "还没有其他用户，没有可发的人。" });
+    for (const id of ids) decision.replies.push({ kind: "send", chatId: id, text: text.slice(0, 500) });
+    return { data: clearPrompt(data, userId), decision };
+  }
+  if (text === "清空" || text === "关闭") {
+    const cleared =
+      kind === "deliver-ad"
+        ? { deliverAd: undefined }
+        : kind === "follow"
+          ? { followChannel: undefined }
+          : kind === "support"
+            ? { support: undefined }
+            : {};
+    decision.replies.push({ kind: "send", chatId, menu: true, text: "已关闭。" });
+    return { data: { ...clearPrompt(data, userId), ...cleared }, decision };
+  }
+  if (kind === "admin-add") {
+    const remove = /^(?:移除|取消)\s+(\d{1,16})$/.exec(text);
+    if (remove) {
+      decision.replies.push({ kind: "send", chatId, menu: true, text: `已移除 ${remove[1]}。` });
+      return { data: { ...clearPrompt(data, userId), adminIds: storageUsers(data).filter((id) => id !== remove[1]) }, decision };
+    }
+    if (!/^\d{1,16}$/.test(text)) {
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "用户编号是一串数字。移除时发送「移除 编号」。" });
+      return { data: clearPrompt(data, userId), decision };
+    }
+    decision.replies.push({ kind: "send", chatId, menu: true, text: `${text} 现在可以存储。` });
+    return { data: { ...clearPrompt(data, userId), adminIds: [...new Set([...storageUsers(data), text])] }, decision };
+  }
+  if (kind === "follow") {
+    const channel = text.startsWith("@") ? text : /^-\d{6,20}$/.test(text) ? text : "";
+    if (!channel) {
+      decision.replies.push({ kind: "send", chatId, menu: true, text: "请发 @频道用户名，或 -100 开头的编号。" });
+      return { data: clearPrompt(data, userId), decision };
+    }
+    decision.replies.push({ kind: "send", chatId, menu: true, text: `已要求先关注 ${channel}。请确认机器人在这个频道里。` });
+    return { data: { ...clearPrompt(data, userId), followChannel: channel }, decision };
+  }
+  const copy = text.slice(0, kind === "support" ? 80 : 500);
+  decision.replies.push({ kind: "send", chatId, menu: true, text: kind === "support" ? "客服说明已更新。" : "取回文件时会附上这段广告。" });
+  return {
+    data: { ...clearPrompt(data, userId), ...(kind === "support" ? { support: copy } : { deliverAd: copy }) },
+    decision,
+  };
+}
+
 function showHome(data: VaultData, decision: Decision, chatId: string, user: TgUser, now: string) {
   if (data.ownerId && data.ownerId === String(user.id)) {
     decision.replies.push({
@@ -778,10 +1075,7 @@ function showHome(data: VaultData, decision: Decision, chatId: string, user: TgU
       chatId,
       menu: true,
       text: withHint(ownerHomeText(data, now), decision),
-      keyboard: [
-        [{ text: "✏️ 设置用户首页文案", callback_data: "ad" }],
-        [{ text: "📖 使用说明", callback_data: "p" }],
-      ],
+      keyboard: ownerHomeKeyboard(),
     });
     return { data, decision };
   }
@@ -790,6 +1084,7 @@ function showHome(data: VaultData, decision: Decision, chatId: string, user: TgU
     chatId,
     menu: true,
     text: withHint(guestHomeText(data, String(user.id)), decision),
+    keyboard: userHomeKeyboard(canStore(data, user.id)),
   });
   return { data, decision };
 }
@@ -1069,6 +1364,8 @@ function parseAction(data: string) {
   if (data === "h") return { type: "home" as const };
   if (data === "p") return { type: "usage" as const };
   if (data === "ad") return { type: "edit-ad" as const };
+  const panel = /^k:(put|dir|sub|fee|adm|vip|sta|ads|die|fwd|all|chn|bak|reb|ord|pay|doc|sup|get)$/.exec(data);
+  if (panel) return { type: "panel" as const, key: panel[1] };
   if (data === "c") return { type: "continue" as const };
   if (data === "e") return { type: "finish" as const };
   if (data === "z") return { type: "drop" as const };

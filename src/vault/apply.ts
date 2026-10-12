@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { explainBot, type BotClient } from "./bot-client";
-import { deliveryBatches, noteDelivery, retrievalPlan } from "./format";
+import { canStore, deliveryBatches, noteDelivery, retrievalPlan } from "./format";
 import { reduceVault, type Decision, type Reply } from "./reduce";
 import type { VaultRepository } from "./store";
 import { CODE_ALPHABET, VAULT_LIMITS, type InlineButton, type TgUpdate, type VaultFile, type VaultPack } from "./types";
@@ -18,8 +18,10 @@ export type VaultIO = {
   editMessage(chatId: string, messageId: number, text: string, keyboard?: InlineButton[][]): Promise<void>;
   answerCallback(id: string, text?: string): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
-  deliver(chatId: string, pack: VaultPack, currentBotId?: string): Promise<void>;
+  deliver(chatId: string, pack: VaultPack, currentBotId?: string, note?: string): Promise<number | void>;
   flashBar?(chatId: string, bar: "finish" | "menu" | "guest"): Promise<void>;
+  getChatMember?(chatId: string, userId: string): Promise<{ status?: string; is_member?: boolean } | null>;
+  setProtect?(on: boolean): void;
 };
 
 export function randomCode() {
@@ -37,20 +39,28 @@ export function ioFromClient(client: BotClient): VaultIO {
     editMessage: (chatId, messageId, text, keyboard) => client.editMessage(chatId, messageId, text, keyboard),
     answerCallback: (id, text) => client.answerCallback(id, text).then(() => undefined),
     deleteMessage: (chatId, messageId) => client.deleteMessage(chatId, messageId).then(() => undefined),
-    deliver: (chatId, pack, currentBotId) => deliverPack(client, chatId, pack, currentBotId),
+    deliver: (chatId, pack, currentBotId, note) => deliverPack(client, chatId, pack, currentBotId, note),
     flashBar: (chatId, bar) => client.flashReplyBar(chatId, bar),
+    getChatMember: async (chatId, userId) => {
+      try {
+        return await client.getChatMember(chatId, userId);
+      } catch {
+        return null;
+      }
+    },
+    setProtect: (on) => {
+      client.protectContent = on;
+    },
   };
 }
 
-export async function deliverPack(client: BotClient, chatId: string, pack: VaultPack, currentBotId?: string) {
+export async function deliverPack(client: BotClient, chatId: string, pack: VaultPack, currentBotId?: string, note?: string) {
   const batches = deliveryBatches(pack.files, currentBotId);
   const grouped = batches.some((batch) => batch.mode === "album");
-  await client.sendMessage(
-    chatId,
-    grouped
-      ? `「${pack.name || "未命名"}」共 ${pack.files.length} 个，按 ${VAULT_LIMITS.filePageSize} 个一组发出`
-      : `「${pack.name || "未命名"}」共 ${pack.files.length} 个`,
-  );
+  const intro = grouped
+    ? `「${pack.name || "未命名"}」共 ${pack.files.length} 个，按 ${VAULT_LIMITS.filePageSize} 个一组发出`
+    : `「${pack.name || "未命名"}」共 ${pack.files.length} 个`;
+  const introId = await client.sendMessage(chatId, note ? `${intro}\n\n${note}` : intro);
   const showIndex = grouped && batches.length > 1;
   let index = 0;
   for (const batch of batches) {
@@ -85,6 +95,7 @@ export async function deliverPack(client: BotClient, chatId: string, pack: Vault
       }
     }
   }
+  return introId;
 }
 
 function joinCaption(label: string, caption?: string) {
@@ -257,14 +268,57 @@ async function perform(decision: Decision, repo: VaultRepository, io: VaultIO, n
       const fresh = await repo.load();
       const pack = fresh.packs.find((entry) => entry.code === decision.deliver?.code && entry.status === "ready");
       if (!pack) throw new Error("没有这个口令");
-      await io.deliver(decision.deliver.chatId, pack, fresh.botId);
-      const count = pack.files.length;
-      await repo.update((current) => noteDelivery(current, count, now));
+      let blocked = false;
+      if (fresh.followChannel && !canStore(fresh, decision.deliver.chatId)) {
+        const member = await io.getChatMember?.(fresh.followChannel, decision.deliver.chatId);
+        const status = member?.status;
+        const joined =
+          status === "creator" ||
+          status === "administrator" ||
+          status === "member" ||
+          (status === "restricted" && member?.is_member !== false);
+        if (!joined) {
+          const name = fresh.followChannel.startsWith("@") ? fresh.followChannel.slice(1) : "";
+          await io.sendMessage(
+            decision.deliver.chatId,
+            name
+              ? `请先关注 ${fresh.followChannel}，然后再取回。`
+              : "请先加入创建者指定的频道，然后再取回。机器人还不能确认你是否已经加入。",
+            name ? [[{ text: "去关注", url: `https://t.me/${name}` }]] : undefined,
+          );
+          blocked = true;
+        }
+      }
+      if (!blocked) {
+        try {
+          io.setProtect?.(fresh.protectContent === true);
+          const introId = await io.deliver(decision.deliver.chatId, pack, fresh.botId, fresh.deliverAd);
+          if (fresh.expireHours && typeof introId === "number") {
+            const deleteAt = new Date(Date.parse(now) + fresh.expireHours * 60 * 60 * 1000).toISOString();
+            const chatId = decision.deliver.chatId;
+            const messageId = introId;
+            await repo.update((current) => ({
+              ...current,
+              expiring: [...(current.expiring ?? []), { chatId, messageId, deleteAt }].slice(-400),
+            }));
+            setTimeout(() => {
+              void io.deleteMessage(chatId, messageId).catch(() => undefined);
+            }, fresh.expireHours * 60 * 60 * 1000).unref();
+          }
+          const count = pack.files.length;
+          await repo.update((current) => noteDelivery(current, count, now));
+        } finally {
+          io.setProtect?.(false);
+        }
+      }
     } catch (error) {
       const message = `取回失败：${explainBot(error) || "请再试一次"}`;
       decision.callbackText = message;
       if (!decision.callbackId) await io.sendMessage(decision.deliver.chatId, message);
     }
+  }
+  if (decision.channelPost) {
+    await io.sendMessage(decision.channelPost.chatId, decision.channelPost.text).catch(() => undefined);
   }
   for (const message of decision.removeChannelMessages ?? []) {
     await io.deleteMessage(message.channelId, message.messageId).catch(() => undefined);
